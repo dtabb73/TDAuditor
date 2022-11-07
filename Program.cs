@@ -202,6 +202,7 @@ namespace TDAuditor
 		public MSSpectrum Next = null;
 		// Other fields we want for tandem mass spectra
 		public String ACTIVATION = "HCD";
+		public int ID = 0;
 		public int MS_ONE_ID = 0;
 		public int MS_ONE_SCAN = 0;
 		public MSSpectrum PrecedingMS1 = null;
@@ -475,7 +476,7 @@ namespace TDAuditor
 					Runner.PRECURSOR_CHARGE = 1;
 					DecidedOnDefault++;
                 }
-				OutFile.WriteLine(Runner.SCANS + "\t" + Runner.PRECURSOR_MZ + "\t" + (Runner.RETENTION_TIME * 60) + "\t" + Runner.PkCount() + TextMS1 + TextMS2 + TextCompl);
+				OutFile.WriteLine(Runner.SCANS + "\t" + Runner.PRECURSOR_MZ + "\t" + (Runner.RETENTION_TIME) + "\t" + Runner.PkCount() + TextMS1 + TextMS2 + TextCompl);
 				Runner = Runner.Next;
 			}
 			Console.WriteLine(NoMatchMS1 + " of " + MS2Count + " MS/MS scans lacked a precursor of charge <= " + MaxCharge + " within isolation window of preceding MS1 scans.");
@@ -634,14 +635,14 @@ namespace TDAuditor
 		public void PrintMSAlign(string FileBase)
 		{
 			MSSpectrum Runner = this.Next;
-			using StreamWriter OutFile = new(FileBase + ".msAlign");
+			using StreamWriter OutFile = new(FileBase + ".msalign");
 			Peak PkRunner;
 			int PkCounter;
 			while (Runner != null)
 			{
 				PkCounter = 0;
 				OutFile.WriteLine("BEGIN IONS");
-				OutFile.WriteLine("ID=1");
+				OutFile.WriteLine("ID=" + Runner.ID);
 				OutFile.WriteLine("FRACTION_ID=0");
 				OutFile.WriteLine("FILE_NAME=" + Runner.FILE_NAME);
 				OutFile.WriteLine("SCANS=" + Runner.SCANS);
@@ -697,8 +698,9 @@ namespace TDAuditor
 					if (spec.MsLevel == 1)
 					{
 						MS1Count++;
-						MS1Runner.Next = new MSSpectrum(spec.ScanNumber, FileString, Convert.ToSingle(spec.ScanStartTime));
+						MS1Runner.Next = new MSSpectrum(spec.ScanNumber, FileString, 60.0f * Convert.ToSingle(spec.ScanStartTime));
 						MS1Runner = MS1Runner.Next;
+						MS1Runner.LEVEL = 1;
 						PRunner = MS1Runner.Peaks;
 						foreach (var thispeak in spec.Peaks)
 						{
@@ -709,8 +711,11 @@ namespace TDAuditor
 					else
 					{
 						MS2Count++;
-						MS2Runner.Next = new MSSpectrum(spec.ScanNumber, FileString, Convert.ToSingle(spec.ScanStartTime));
+						MS2Runner.Next = new MSSpectrum(spec.ScanNumber, FileString, 60.0f * Convert.ToSingle(spec.ScanStartTime));
 						MS2Runner = MS2Runner.Next;
+						MS2Runner.LEVEL = 2;
+						MS2Runner.ID = MS2Count-1;
+						MS2Runner.MS_ONE_ID = MS1Count-1;
 						PRunner = MS2Runner.Peaks;
 						foreach (var thispeak in spec.Peaks)
 						{
