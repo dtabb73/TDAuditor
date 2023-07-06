@@ -8,11 +8,19 @@ namespace TDAuditor {
 
     class Program {
 
-	static void Main(string[] args) {
+	static void Main(string[] args)
+	{
 	    Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
 	    Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-	    Console.WriteLine("alpha version 20230611");
+	    Console.WriteLine("alpha version 20230706");
 
+	    /*
+	      Would like to have the following:
+	      -What is the max resolution seen for MS scans?
+	      -What is the max resolution seen for MSn scans?
+	      -What is the redundancy of precursor mass measurements?
+	    */
+	    
 	    string CWD = Directory.GetCurrentDirectory();
 	    string mzMLPattern = "*.mzML";
 	    string msAlignPattern = "*ms2.msalign";
@@ -22,17 +30,11 @@ namespace TDAuditor {
 	    LCMSMSExperiment RawsRunner = Raws;
 	    string   Basename;
 
-	    Console.WriteLine("\nProcessing these mzMLs:");
-	    foreach (string current in mzMLs)
-	    {
-		Console.WriteLine(Path.GetFileNameWithoutExtension(current));
-	    }
-
 	    Console.WriteLine("\nImporting from mzML files...");
 	    foreach (string current in mzMLs)
 	    {
 		Basename = Path.GetFileNameWithoutExtension(current);
-		Console.WriteLine("\tWorking on {0}",Basename);
+		Console.WriteLine("\tReading mzML {0}",Basename);
 		RawsRunner.Next = new LCMSMSExperiment();
 		string    FileSpec = Path.Combine(CWD, current);
 		XmlReader XMLfile = XmlReader.Create(FileSpec);
@@ -41,12 +43,14 @@ namespace TDAuditor {
 		RawsRunner.ReadFromMZML(XMLfile);
 		RawsRunner.ParseScanNumbers();
 	    }
+	    // TODO: The following will run into a problem if some has created a conjoint ms2.msalign file in TopPIC
 	    Console.WriteLine("\nImporting from msAlign files...");
 	    foreach (string current in msAligns)
 	    {
 		Basename = Path.GetFileNameWithoutExtension(current);
-		Console.WriteLine("\tWorking on {0}",Basename);
-		LCMSMSExperiment CorrespondingRaw = Raws.Find(Basename);
+		Console.WriteLine("\tReading msAlign {0}",Basename);
+		string SourcemzML = SniffMSAlignForSource(current);
+		LCMSMSExperiment CorrespondingRaw = Raws.Find(SourcemzML);
 		if (CorrespondingRaw == null) {
 		    Console.Error.WriteLine("\tWARNING: {0} could not be matched to an mzML title.",Basename);
 		}
@@ -60,7 +64,22 @@ namespace TDAuditor {
 	     */
 	    Console.WriteLine("\nWriting TDAuditor-byRun and TDAuditor-byMSn TSV reports...");
 	    Raws.WriteTextQCReport();
-
+	}
+	
+	static string SniffMSAlignForSource(string PathAndFile)
+	{
+	    using (StreamReader msAlign = new StreamReader(PathAndFile))
+	    {
+		string LineBuffer = msAlign.ReadLine();
+		while (LineBuffer != null) {
+		    if (LineBuffer.StartsWith("FILE_NAME="))
+			return LineBuffer.Substring(10,LineBuffer.Length-15);
+		    LineBuffer=msAlign.ReadLine();
+		}
+	    }
+	    Console.Error.WriteLine("Could not determine source mzML from {0}.",PathAndFile);
+	    Environment.Exit(1);
+	    return "";
 	}
     }
     
@@ -90,6 +109,8 @@ namespace TDAuditor {
 	public int    mzMLMS1Count=0;
 	public int    mzMLMSnCount=0;
 	public int    msAlignMSnCount=0;
+	// This next count includes only the MSn scans with zero peaks in their deconvolutions
+	public int    msAlignMSnCount0=0;
 	// The following MSn counts reflect mzML information
 	public int    mzMLHCDCount=0;
 	public int    mzMLCIDCount=0;
@@ -98,9 +119,13 @@ namespace TDAuditor {
 	public int    mzMLEThcDCount=0;
 	public int    mzMLETciDCount=0;
 	// Charge state histograms
-	public static int MaxZ=31;
-	public int[]  mzMLPrecursorZ    = new int[MaxZ];
-	public int[]  msAlignPrecursorZ = new int[MaxZ];
+	public static int MaxZ=100;
+	public int[]  mzMLPrecursorZ    = new int[MaxZ+1];
+	public int[]  msAlignPrecursorZ = new int[MaxZ+1];
+	public int    mzMLPrecursorZMin=MaxZ;
+	public int    mzMLPrecursorZMax=0;
+	public int    msAlignPrecursorZMin=MaxZ;
+	public int    msAlignPrecursorZMax=0;
 	// Per-scan metrics
 	public  ScanMetrics ScansTable = new ScanMetrics();
 	private ScanMetrics ScansRunner;
@@ -196,7 +221,13 @@ namespace TDAuditor {
 			StartTimeStamp = Xread.GetAttribute("startTimeStamp");
 		    }
 		    else if (Xread.Name=="spectrum") {
-			// We only create a new ScanMetrics object if it isn't an MS1 scan.  We need to keep two pieces of information from this new spectrum header in case we do make a new ScanMetrics object.
+			/*
+			  We only create a new ScanMetrics object if
+			  it isn't an MS1 scan.  We need to keep two
+			  pieces of information from this new spectrum
+			  header in case we do make a new ScanMetrics
+			  object.
+			*/
 			string ThisPeakCount = Xread.GetAttribute("defaultArrayLength");
 			LastPeakCount = int.Parse(ThisPeakCount);
 			LastNativeID = Xread.GetAttribute("id");
@@ -218,10 +249,13 @@ namespace TDAuditor {
 			      list.  Just add a "case" line for it and
 			      recompile.
 			     */
-			    case "MS:1001911":
-			    case "MS:1002732":
 			    case "MS:1000557":
 			    case "MS:1001910":
+			    case "MS:1001911":
+			    case "MS:1002416":
+			    case "MS:1002523":
+			    case "MS:1002732":
+			    case "MS:1003029":
 				Instrument = Xread.GetAttribute("name");
 				break;
 			    case "MS:1000529":
@@ -272,7 +306,14 @@ namespace TDAuditor {
 				string ThisCharge = Xread.GetAttribute("value");
 				int    ThisChargeInt = int.Parse(ThisCharge);
 				ScansRunner.mzMLPrecursorZ = ThisChargeInt;
-				mzMLPrecursorZ[ThisChargeInt]++;
+				if (ThisChargeInt < mzMLPrecursorZMin) mzMLPrecursorZMin = ThisChargeInt;
+				if (ThisChargeInt > mzMLPrecursorZMax) mzMLPrecursorZMax = ThisChargeInt;
+				try {
+				    mzMLPrecursorZ[ThisChargeInt]++;
+				}
+				catch (IndexOutOfRangeException e) {
+				    Console.Error.WriteLine("Maximum charge of {0} is less than mzML charge {1}.",MaxZ,ThisChargeInt);
+				}
 				break;
 			    case "MS:1000133":
 				ThisScanIsCID = true;
@@ -286,7 +327,7 @@ namespace TDAuditor {
 			    case "MS:1000598":
 				ThisScanIsETD = true;
 				break;
-				/*  May need to implement IRMPD combinations, too.
+				/*  TODO: May need to implement IRMPD combinations, too.
 			    case "MS:1000262":
 				ThisScanIsIRMPD = true;
 				break;
@@ -307,7 +348,7 @@ namespace TDAuditor {
 	    */
 	    LCMSMSExperiment LRunner = this.Next;
 	    while (LRunner != null) {
-		if (Basename.StartsWith(LRunner.SourceFile))
+		if (Basename == LRunner.SourceFile)
 		    return LRunner;
 		LRunner = LRunner.Next;
 	    }
@@ -383,15 +424,26 @@ namespace TDAuditor {
 				case "SCANS":
 				    NumberFromString = int.Parse(Tokens[1]);
 				    ScanRunner = this.GoToScan(NumberFromString);
+				    if (ScanRunner == null) {
+					Console.Error.WriteLine("Error seeking scan {0} from {1}",NumberFromString,PathAndFileName);
+				    }
 				    this.msAlignMSnCount++;
 				    break;
 				case "PRECURSOR_CHARGE":
 				    NumberFromString = int.Parse(Tokens[1]);
 				    ScanRunner.msAlignPrecursorZ = NumberFromString;
-				    this.msAlignPrecursorZ[NumberFromString]++;
+				    if (NumberFromString < this.msAlignPrecursorZMin) this.msAlignPrecursorZMin = NumberFromString;
+				    if (NumberFromString > this.msAlignPrecursorZMax) this.msAlignPrecursorZMax = NumberFromString;
+				    try {
+					this.msAlignPrecursorZ[NumberFromString]++;
+				    }
+				    catch (IndexOutOfRangeException e) {
+					Console.Error.WriteLine("Maximum charge of {0} is less than msAlign charge {1}.",MaxZ,NumberFromString);
+				    }
 				    break;
 				case "PRECURSOR_INTENSITY":
 				    // We are interested in this one because it is the last before the mass list!
+				    // TODO: Make this count the consecutive lines starting with a numeric value appearing before END IONs-- the current strategy will break with minor format variations.
 				    int PkCount = 0;
 				    LineBuffer = msAlign.ReadLine();
 				    while (LineBuffer != "END IONS") {
@@ -399,6 +451,7 @@ namespace TDAuditor {
 					LineBuffer = msAlign.ReadLine();
 				    }
 				    ScanRunner.msAlignPeakCount = PkCount;
+				    if (PkCount == 0) this.msAlignMSnCount0++;
 				    break;
 			    }
 			}
@@ -419,12 +472,13 @@ namespace TDAuditor {
 	    string delim = "\t";
 	    using (StreamWriter TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
 	    {
-		TSVbyRun.Write("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration\tMS1Count\tmzMLMSnCount\tmsAlignMSnCount\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount\t");
-		for (int i=0; i<MaxZ; i++)
+		TSVbyRun.Write("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration\tMS1Count\tmzMLMSnCount\tmsAlignMSnCount\tmsAlignMSnCount0\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount\tmzMLPreZMin\tmzMLPreZMax\tmsAlignPreZMin\tmsAlignPreZMax\tblank\t");
+		for (int i=0; i<=MaxZ; i++)
 		{
 		    TSVbyRun.Write("mzMLPreZ={0}\t",i);
 		}
-		for (int i=0; i<MaxZ; i++)
+		TSVbyRun.Write("blank\t");
+		for (int i=0; i<=MaxZ; i++)
 		{
 		    TSVbyRun.Write("msAlignPreZ={0}\t",i);
 		}
@@ -439,16 +493,23 @@ namespace TDAuditor {
 		    TSVbyRun.Write(LCMSMSRunner.mzMLMS1Count + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLMSnCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.msAlignMSnCount + delim);
+		    TSVbyRun.Write(LCMSMSRunner.msAlignMSnCount0 + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLHCDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLCIDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLETDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLECDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLEThcDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLETciDCount + delim);
+		    TSVbyRun.Write(LCMSMSRunner.mzMLPrecursorZMin + delim);
+		    TSVbyRun.Write(LCMSMSRunner.mzMLPrecursorZMax + delim);
+		    TSVbyRun.Write(LCMSMSRunner.msAlignPrecursorZMin + delim);
+		    TSVbyRun.Write(LCMSMSRunner.msAlignPrecursorZMax + delim);
+		    TSVbyRun.Write(delim);
 		    foreach(int charge in LCMSMSRunner.mzMLPrecursorZ)
 		    {
 			TSVbyRun.Write(charge + delim);
 		    }
+		    TSVbyRun.Write(delim);
 		    foreach(int charge in LCMSMSRunner.msAlignPrecursorZ)
 		    {
 			TSVbyRun.Write(charge + delim);
