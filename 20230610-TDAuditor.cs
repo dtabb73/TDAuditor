@@ -3,6 +3,7 @@ using System.IO;
 using System.Data;
 using System.Text;
 using System.Xml;
+using System.Globalization;
 
 namespace TDAuditor {
 
@@ -10,15 +11,18 @@ namespace TDAuditor {
 
 	static void Main(string[] args)
 	{
+	    // Use periods to separate decimals
+	    CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 	    Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
 	    Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-	    Console.WriteLine("alpha version 20230706");
+	    Console.WriteLine("alpha version 20230721");
 
 	    /*
 	      Would like to have the following:
 	      -What is the max resolution seen for MS scans?
 	      -What is the max resolution seen for MSn scans?
 	      -What is the redundancy of precursor mass measurements?
+	      -For each MS/MS, determine if another MS/MS in this msAlign matches its fragments
 	    */
 	    
 	    string CWD = Directory.GetCurrentDirectory();
@@ -59,9 +63,11 @@ namespace TDAuditor {
 		}
 	    }
 	    /*
-	      At this point, we should really check to see if any of
-	      the mzMLs lack corresponding msAlign files.
+	      TODO: we should really check to see if any of the mzMLs
+	      lack corresponding msAlign files.
 	     */
+	    Console.WriteLine("\nSeeking MS/MS scan pairs with many shared masses...");
+	    Raws.FindSimilarSpectraWithinRaw();
 	    Console.WriteLine("\nWriting TDAuditor-byRun and TDAuditor-byMSn TSV reports...");
 	    Raws.WriteTextQCReport();
 	}
@@ -82,6 +88,20 @@ namespace TDAuditor {
 	    return "";
 	}
     }
+
+    class MSMSPeak {
+	public double   Mass=0;
+	public float    Intensity=0;
+	public int      OrigZ=0;
+	public MSMSPeak Next=null;
+    }
+
+    class SimilarityLink
+    {
+	public ScanMetrics    Other=null;
+	public double         Score=0;
+	public SimilarityLink Next=null;
+    }
     
     class ScanMetrics {
 	public string NativeID="";
@@ -90,12 +110,126 @@ namespace TDAuditor {
 	//TODO Should I record what dissociation type msAlign reports?
 	public int    mzMLPrecursorZ=0;
 	public int    msAlignPrecursorZ=0;
+	public double msAlignPrecursorMass=0;
 	public int    mzMLPeakCount=0;
 	public int    msAlignPeakCount=0;
+	public double[] PeakMZs;
 	//TODO Incorporate DirecTag data
 	public float  DirecTagScore=0;
 	public ScanMetrics Next = null;
 	public int    ScanNumber;
+	public SimilarityLink SimilarScans = new SimilarityLink();
+	public  static double FragmentTolerance = 0.1;
+	private static double LowMZ = 400;
+	private static double HighMZ = 2000;
+	public  static int    NumberOfPossibleMasses = (int)(Math.Ceiling((HighMZ-LowMZ)/FragmentTolerance));
+	public  static double[] LogFactorials;
+
+	public static void ComputeLogFactorials()
+	{
+	    /*
+	      We will compute MS/MS match log probabilities by the
+	      hypergeometric distribution.  Therefore we will need log
+	      factorials; this will be our lookup table.
+	    */
+	    LogFactorials = new double[NumberOfPossibleMasses+1];
+	    double Accum = 0;
+	    double ThisLog;
+	    LogFactorials[0] = Math.Log(1);
+	    for (int index = 1; index <= NumberOfPossibleMasses; index++)
+	    {
+		ThisLog = Math.Log(index);
+		Accum += ThisLog;
+		//Console.WriteLine("index = {0}, ThisLog = {1}, Accum = {2}",index,ThisLog,Accum);
+		LogFactorials[index] = Accum;
+	    }
+	}
+
+	public static double ComputeLogCombinationCount(int big, int little)
+	{
+	    // This code computes numbers of combinations on a log scale
+	    double LogCombinationCount;
+	    LogCombinationCount = LogFactorials[big]-(LogFactorials[little]+LogFactorials[big-little]);
+	    return(LogCombinationCount);
+	}
+	
+	public static double log1pexp(double x)
+	{
+	    // This function prevents failures when probabilities are very close to zero.
+	    return x < Math.Log(Double.Epsilon) ? 0 : Math.Log(Math.Exp(x)+1);
+	}
+
+	public static double sum_log_prob(double a, double b)
+	{
+	    // This function adds together log probabilities efficiently.
+	    return a>b ? a+log1pexp(b-a):  b+log1pexp(a-b);
+	}
+    
+	public double TestForSimilarity (ScanMetrics Other)
+	{
+	    // Compare this MS/MS mass list to the other one; how many masses do the lists share?
+	    int ThisOffset = 0;
+	    int OtherOffset = 0;
+	    double MassDiff;
+	    double AbsMassDiff;
+	    int MatchesSoFar = 0;
+	    int CombA;
+	    int CombB;
+	    int CombC;
+	    int CombD;
+	    double NegLogProbability;
+	    double LPSum;
+	    while ((ThisOffset < this.msAlignPeakCount) && (OtherOffset < Other.msAlignPeakCount))
+	    {
+		MassDiff = this.PeakMZs[ThisOffset] - Other.PeakMZs[OtherOffset];
+		AbsMassDiff = Math.Abs(MassDiff);
+		if (AbsMassDiff < FragmentTolerance)
+		{
+		    MatchesSoFar++;
+		    ThisOffset++;
+		    OtherOffset++;
+		}
+		else
+		{
+		    if (MassDiff > 0)
+		    {
+			OtherOffset++;
+		    }
+		    else
+		    {
+			ThisOffset++;
+		    }
+		}
+	    }
+	    if (MatchesSoFar > 0)
+	    {
+		//Compute point hypergeometric probability
+		CombA = this.msAlignPeakCount;
+		CombB = MatchesSoFar;
+		CombC = NumberOfPossibleMasses;
+		CombD = Other.msAlignPeakCount;
+		LPSum = (ComputeLogCombinationCount(CombA,CombB)+ComputeLogCombinationCount(CombC-CombA,CombD-CombB))-ComputeLogCombinationCount(CombC,CombD);
+		int MostMatchesPossible = Math.Min(this.msAlignPeakCount, Other.msAlignPeakCount);
+		for (int MoreMatches = MatchesSoFar +1; MoreMatches <= MostMatchesPossible; MoreMatches++)
+		{
+		    LPSum = sum_log_prob(LPSum, (ComputeLogCombinationCount(CombA,MoreMatches)+ComputeLogCombinationCount(CombC-CombA,CombD-MoreMatches))-ComputeLogCombinationCount(CombC,CombD));
+		}
+		NegLogProbability = -LPSum;
+		bool MassMatch = Math.Abs(this.msAlignPrecursorMass - Other.msAlignPrecursorMass) < 2.1;
+		/*
+		if(NegLogProbability > 100)
+		{
+		    Console.WriteLine("MatchedPeaks\t{0}\tThisPeaks\t{1}\tOtherPeaks\t{2}\tNegLogProb\t{3}\tThisMass\t{4}\tOtherMass\t{5}\tMassMatch\t{6}",
+				      MatchesSoFar,CombA,CombD,NegLogProbability,this.msAlignPrecursorMass,Other.msAlignPrecursorMass,MassMatch);
+		}
+		*/
+		return NegLogProbability;
+	    }
+	    else
+	    {
+		return 0;
+	    }
+	}
     }
 
     class LCMSMSExperiment {
@@ -111,6 +245,8 @@ namespace TDAuditor {
 	public int    msAlignMSnCount=0;
 	// This next count includes only the MSn scans with zero peaks in their deconvolutions
 	public int    msAlignMSnCount0=0;
+	// What fraction of all possible MSn-MSn links were detected in deconvolved mass lists?
+	public float  Redundancy=0;
 	// The following MSn counts reflect mzML information
 	public int    mzMLHCDCount=0;
 	public int    mzMLCIDCount=0;
@@ -263,7 +399,8 @@ namespace TDAuditor {
 				break;
 			    case "MS:1000016":
 				string ThisStartTime = Xread.GetAttribute("value");
-				float  ThisStartTimeFloat = float.Parse(ThisStartTime);
+				// We need the "InvariantCulture" nonsense because some parts of the world separate decimals with commas.
+				float  ThisStartTimeFloat = Single.Parse(ThisStartTime, CultureInfo.InvariantCulture);
 				ScansRunner.ScanStartTime = ThisStartTimeFloat;
 				if (ThisStartTimeFloat > MaxScanStartTime) MaxScanStartTime = ThisStartTimeFloat;
 				break;
@@ -272,6 +409,7 @@ namespace TDAuditor {
 				int    ThisLevelInt = int.Parse(ThisLevel);
 				if (ThisLevelInt == 1)
 				{
+				    // We do very little with MS scans other than count them.
 				    mzMLMS1Count++;
 				}
 				else
@@ -311,7 +449,7 @@ namespace TDAuditor {
 				try {
 				    mzMLPrecursorZ[ThisChargeInt]++;
 				}
-				catch (IndexOutOfRangeException e) {
+				catch (IndexOutOfRangeException) {
 				    Console.Error.WriteLine("Maximum charge of {0} is less than mzML charge {1}.",MaxZ,ThisChargeInt);
 				}
 				break;
@@ -405,10 +543,12 @@ namespace TDAuditor {
 	     */
 	    using (StreamReader msAlign = new StreamReader(PathAndFileName))
 	    {
-		string LineBuffer = msAlign.ReadLine();
-		string [] Tokens;
+		string      LineBuffer = msAlign.ReadLine();
+		string []   Tokens;
 		ScanMetrics ScanRunner = null;
-		int NumberFromString;
+		MSMSPeak    PeakList = null;
+		MSMSPeak    PeakRunner = null;
+		int         NumberFromString;
 		while (LineBuffer != null) {
 		    /*
 		      We are particularly interested in the block of
@@ -417,46 +557,145 @@ namespace TDAuditor {
 		      equals symbol.
 		    */
 		    if (LineBuffer.Contains("="))
+		    {
+			Tokens = LineBuffer.Split('=');
+			switch (Tokens[0])
 			{
-			    Tokens = LineBuffer.Split('=');
-			    switch (Tokens[0])
-			    {
-				case "SCANS":
-				    NumberFromString = int.Parse(Tokens[1]);
-				    ScanRunner = this.GoToScan(NumberFromString);
-				    if (ScanRunner == null) {
-					Console.Error.WriteLine("Error seeking scan {0} from {1}",NumberFromString,PathAndFileName);
-				    }
-				    this.msAlignMSnCount++;
-				    break;
-				case "PRECURSOR_CHARGE":
-				    NumberFromString = int.Parse(Tokens[1]);
-				    ScanRunner.msAlignPrecursorZ = NumberFromString;
-				    if (NumberFromString < this.msAlignPrecursorZMin) this.msAlignPrecursorZMin = NumberFromString;
-				    if (NumberFromString > this.msAlignPrecursorZMax) this.msAlignPrecursorZMax = NumberFromString;
-				    try {
-					this.msAlignPrecursorZ[NumberFromString]++;
-				    }
-				    catch (IndexOutOfRangeException e) {
-					Console.Error.WriteLine("Maximum charge of {0} is less than msAlign charge {1}.",MaxZ,NumberFromString);
-				    }
-				    break;
-				case "PRECURSOR_INTENSITY":
-				    // We are interested in this one because it is the last before the mass list!
-				    // TODO: Make this count the consecutive lines starting with a numeric value appearing before END IONs-- the current strategy will break with minor format variations.
-				    int PkCount = 0;
-				    LineBuffer = msAlign.ReadLine();
-				    while (LineBuffer != "END IONS") {
-					PkCount++;
-					LineBuffer = msAlign.ReadLine();
-				    }
-				    ScanRunner.msAlignPeakCount = PkCount;
-				    if (PkCount == 0) this.msAlignMSnCount0++;
-				    break;
-			    }
+			    case "SCANS":
+				NumberFromString = int.Parse(Tokens[1]);
+				ScanRunner = this.GoToScan(NumberFromString);
+				if (ScanRunner == null) {
+				    Console.Error.WriteLine("Error seeking scan {0} from {1}",NumberFromString,PathAndFileName);
+				}
+				PeakList = new MSMSPeak();
+				PeakRunner = PeakList;
+				this.msAlignMSnCount++;
+				break;
+			    case "PRECURSOR_CHARGE":
+				NumberFromString = int.Parse(Tokens[1]);
+				ScanRunner.msAlignPrecursorZ = NumberFromString;
+				if (NumberFromString < this.msAlignPrecursorZMin) this.msAlignPrecursorZMin = NumberFromString;
+				if (NumberFromString > this.msAlignPrecursorZMax) this.msAlignPrecursorZMax = NumberFromString;
+				try {
+				    this.msAlignPrecursorZ[NumberFromString]++;
+				}
+				catch (IndexOutOfRangeException) {
+				    Console.Error.WriteLine("Maximum charge of {0} is less than msAlign charge {1}.",MaxZ,NumberFromString);
+				}
+				break;
+			    case "PRECURSOR_MASS":
+				ScanRunner.msAlignPrecursorMass = double.Parse(Tokens[1], CultureInfo.InvariantCulture);
+				break;
 			}
+		    }
+		    else if ((LineBuffer.Length > 0) && char.IsDigit(LineBuffer[0]))
+		    {
+			//This is a line containing a deconvolved mass, intensity, and original charge, delimited by whitespace
+			Tokens = LineBuffer.Split(null);
+			PeakRunner.Next = new MSMSPeak();
+			//This new linked list is temporary storage while we're on this scan; we'll dump the mass list to an array in a moment.
+			PeakRunner = PeakRunner.Next;
+			PeakRunner.Mass = double.Parse(Tokens[0], CultureInfo.InvariantCulture);
+			PeakRunner.Intensity = float.Parse(Tokens[1], CultureInfo.InvariantCulture);
+			PeakRunner.OrigZ = int.Parse(Tokens[2]);
+			ScanRunner.msAlignPeakCount++;
+		    }
+		    else if (LineBuffer == "END IONS")
+		    {
+			if (ScanRunner.msAlignPeakCount == 0) this.msAlignMSnCount0++;
+			else
+			{
+			    // Copy the linked list masses to an array and sort it.
+			    ScanRunner.PeakMZs = new double[ScanRunner.msAlignPeakCount];
+			    int Offset = 0;
+			    PeakRunner = PeakList.Next;
+			    while (PeakRunner != null)
+			    {
+				ScanRunner.PeakMZs[Offset] = PeakRunner.Mass;
+				Offset++;
+				PeakRunner=PeakRunner.Next;
+			    }
+			    Array.Sort(ScanRunner.PeakMZs);
+			}
+		    }
 		    LineBuffer = msAlign.ReadLine();
 		}
+	    }
+	}
+
+	public void FindSimilarSpectraWithinRaw()
+	{
+	    LCMSMSExperiment LCMSMSRunner = this.Next;
+	    SimilarityLink   SimilarityRunner;
+	    SimilarityLink   SimBuffer;
+	    double           ThisMatchScore;
+	    int              NonVacantScanCount;
+	    int              LinkCount;
+	    int              LinksPerMSn;
+	    int              MostLinksPerMSn;
+	    ScanMetrics.ComputeLogFactorials();
+	    while (LCMSMSRunner != null) {
+		ScanMetrics SMRunner = LCMSMSRunner.ScansTable.Next;
+		NonVacantScanCount=0;
+		LinkCount=0;
+		MostLinksPerMSn=0;
+		while (SMRunner != null) {
+		    if (SMRunner.msAlignPeakCount > 0)
+		    {
+			ScanMetrics OtherScan = SMRunner.Next;
+			SimilarityRunner = SMRunner.SimilarScans;
+			//NonVacantScanCount should, in the end, be the same as msAlignMSnCount - msAlignMSnCount0
+			NonVacantScanCount++;
+			LinksPerMSn = 0;
+			while (OtherScan != null)
+			{
+			    if (OtherScan.msAlignPeakCount > 0)
+			    {
+				//Test these two scans to determine if they have an improbable amount of deconvolved mass overlap.
+				ThisMatchScore = SMRunner.TestForSimilarity(OtherScan);
+				if (ThisMatchScore > 100)
+				{
+				    //Make a link between these MS/MS scans to reflect their high mass list overlap
+				    SimBuffer=SimilarityRunner.Next;
+				    SimilarityRunner.Next = new SimilarityLink();
+				    SimilarityRunner = SimilarityRunner.Next;
+				    SimilarityRunner.Other = OtherScan;
+				    SimilarityRunner.Score = ThisMatchScore;
+				    SimilarityRunner.Next = SimBuffer;
+				    //Make the reverse link
+				    SimBuffer = OtherScan.SimilarScans.Next;
+				    OtherScan.SimilarScans.Next = new SimilarityLink();
+				    OtherScan.SimilarScans.Next.Other=SMRunner;
+				    OtherScan.SimilarScans.Next.Score = ThisMatchScore;
+				    OtherScan.SimilarScans.Next.Next = SimBuffer;
+				    LinkCount++;
+				    LinksPerMSn++;
+				}
+			    }
+			    OtherScan = OtherScan.Next;
+			}
+			if (LinksPerMSn > MostLinksPerMSn) MostLinksPerMSn = LinksPerMSn;
+		    }
+		    SMRunner = SMRunner.Next;
+		}
+		if (LinkCount == 0)
+		{
+		    LCMSMSRunner.Redundancy = 0;
+		}
+		else
+		{
+		    /*
+		      The math here is based on the handshake problem:
+		      in a party attended by N people, how many
+		      distinct handshakes can take place?  The answer
+		      is (N(N-1))/2.  If N==1, this would result in a
+		      division by zero.
+		    */
+		    LCMSMSRunner.Redundancy = (float)LinkCount / (float)(NonVacantScanCount * (NonVacantScanCount-1) / 2);
+		}
+		Console.WriteLine("\tDetected {0} MSn-MSn links within {1}",
+				  LinkCount,LCMSMSRunner.SourceFile);
+		LCMSMSRunner = LCMSMSRunner.Next;
 	    }
 	}
 	
@@ -472,7 +711,7 @@ namespace TDAuditor {
 	    string delim = "\t";
 	    using (StreamWriter TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
 	    {
-		TSVbyRun.Write("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration\tMS1Count\tmzMLMSnCount\tmsAlignMSnCount\tmsAlignMSnCount0\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount\tmzMLPreZMin\tmzMLPreZMax\tmsAlignPreZMin\tmsAlignPreZMax\tblank\t");
+		TSVbyRun.Write("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration\tMS1Count\tmzMLMSnCount\tmsAlignMSnCount\tmsAlignMSnCount0\tRedundancy\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount\tmzMLPreZMin\tmzMLPreZMax\tmsAlignPreZMin\tmsAlignPreZMax\tblank\t");
 		for (int i=0; i<=MaxZ; i++)
 		{
 		    TSVbyRun.Write("mzMLPreZ={0}\t",i);
@@ -494,6 +733,7 @@ namespace TDAuditor {
 		    TSVbyRun.Write(LCMSMSRunner.mzMLMSnCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.msAlignMSnCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.msAlignMSnCount0 + delim);
+		    TSVbyRun.Write(LCMSMSRunner.Redundancy + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLHCDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLCIDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLETDCount + delim);
@@ -521,7 +761,7 @@ namespace TDAuditor {
 	    LCMSMSRunner = this.Next;
 	    using (StreamWriter TSVbyScan = new StreamWriter("TDAuditor-byMSn.tsv"))
 	    {
-		TSVbyScan.WriteLine("SourceFile\tNativeID\tScanStartTime\tmzMLDissociation\tmzMLPrecursorZ\tmsAlignPrecursorZ\tmzMLPeakCount\tmsAlignPeakCount");
+		TSVbyScan.WriteLine("SourceFile\tNativeID\tScanStartTime\tmzMLDissociation\tmzMLPrecursorZ\tmsAlignPrecursorZ\tmsAlignPrecursorMass\tmzMLPeakCount\tmsAlignPeakCount");
 		while (LCMSMSRunner != null) {
 		    ScanMetrics SMRunner = LCMSMSRunner.ScansTable.Next;
 		    while (SMRunner != null) {
@@ -531,6 +771,7 @@ namespace TDAuditor {
 			TSVbyScan.Write(SMRunner.mzMLDissociation + delim);
 			TSVbyScan.Write(SMRunner.mzMLPrecursorZ + delim);
 			TSVbyScan.Write(SMRunner.msAlignPrecursorZ + delim);
+			TSVbyScan.Write(SMRunner.msAlignPrecursorMass + delim);
 			TSVbyScan.Write(SMRunner.mzMLPeakCount + delim);
 			TSVbyScan.Write(SMRunner.msAlignPeakCount + delim);
 			TSVbyScan.WriteLine();
