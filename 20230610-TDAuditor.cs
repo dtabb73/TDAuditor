@@ -15,10 +15,10 @@ namespace TDAuditor {
 	    CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 	    Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
 	    Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-	    Console.WriteLine("alpha version 20230807");
+	    Console.WriteLine("alpha version 20230811");
 
 	    /*
-	      Would like to have the following:
+	      TODO: Would like to have the following:
 	      -What is the max resolution seen for MS scans?
 	      -What is the max resolution seen for MSn scans?
 	    */
@@ -146,7 +146,6 @@ namespace TDAuditor {
 	public int    Degree=0;
 	public int    ComponentNumber=0;
 	public bool   Visited=false;
-	//TODO Incorporate DirecTag data
 	public float  LongestTag=0;
 	public ScanMetrics Next = null;
 	public int    ScanNumber;
@@ -159,6 +158,7 @@ namespace TDAuditor {
 	//TODO Allow users to specify alternative mass for Cys
 	// Values from https://education.expasy.org/student_projects/isotopident/htdocs/aa-list.html
 	public  static double[] AminoAcids = {57.02146,71.03711,87.03203,97.05276,99.06841,101.04768,103.00919,113.08406,114.04293,115.02694,128.05858,128.09496,129.04259,131.04049,137.05891,147.06841,156.10111,163.06333,186.07931};
+	public  static string[] AminoAcidSymbols = {"G","A","S","P","V","T","C","L/I","N","D","Q","K","E","M","H","F","R","Y","W"};
 
 	public static void ComputeLogFactorials()
 	{
@@ -321,8 +321,10 @@ namespace TDAuditor {
 	public int    mzMLETciDCount=0;
 	// Charge state histograms
 	public static int MaxZ=100;
+	public static int MaxLength=50;
 	public int[]  mzMLPrecursorZ    = new int[MaxZ+1];
 	public int[]  msAlignPrecursorZ = new int[MaxZ+1];
+	public int[]  LongestTagDistn  = new int[MaxLength+1];
 	public int    mzMLPrecursorZMin=MaxZ;
 	public int    mzMLPrecursorZMax=0;
 	public int    msAlignPrecursorZMin=MaxZ;
@@ -664,9 +666,9 @@ namespace TDAuditor {
 			  mass list to an array in a moment.
 			*/
 			PeakRunner = PeakRunner.Next;
-			PeakRunner.Mass = double.Parse(Tokens[0], CultureInfo.InvariantCulture);
+			PeakRunner.Mass =      double.Parse(Tokens[0], CultureInfo.InvariantCulture);
 			PeakRunner.Intensity = float.Parse(Tokens[1], CultureInfo.InvariantCulture);
-			PeakRunner.OrigZ = int.Parse(Tokens[2]);
+			PeakRunner.OrigZ =     int.Parse(Tokens[2]);
 			ScanRunner.msAlignPeakCount++;
 		    }
 		    else if (LineBuffer == "END IONS")
@@ -718,17 +720,23 @@ namespace TDAuditor {
 			    {
 				// Test these two scans to determine if they have an improbable amount of deconvolved mass overlap.
 				ThisMatchScore = SMRunner.TestForSimilarity(OtherScan);
-				// 100 is a very arbitrary threshold...
+				/*
+				  100 is a very arbitrary threshold...
+				  ThisMatchScore is a log probability
+				  that the spectra would share this
+				  many overlapping peaks _or more_ by
+				  random chance.
+				*/
 				if (ThisMatchScore > 100)
 				{
-				    //Make a link between these MS/MS scans to reflect their high mass list overlap
+				    //Make a link between these MS/MS scans to reflect their high mass list overlap.
 				    SimBuffer=SimilarityRunner.Next;
 				    SimilarityRunner.Next = new SimilarityLink();
 				    SimilarityRunner = SimilarityRunner.Next;
 				    SimilarityRunner.Other = OtherScan;
 				    SimilarityRunner.Score = ThisMatchScore;
 				    SimilarityRunner.Next = SimBuffer;
-				    //Make the reverse link
+				    //Make the reverse link; this is necessary for component detector.
 				    SimBuffer = OtherScan.SimilarScans.Next;
 				    OtherScan.SimilarScans.Next = new SimilarityLink();
 				    OtherScan.SimilarScans.Next.Other = SMRunner;
@@ -799,7 +807,6 @@ namespace TDAuditor {
 		    }
 		    else
 		    {
-			//TODO: Should we consider MSn scans with degree zero?
 			//This scan is a starting point for an unexplored component.
 			ComponentCount++;
 			SMRunner.Visited = true;
@@ -822,7 +829,7 @@ namespace TDAuditor {
 		}
 		LCMSMSRunner.ComponentCount=ComponentCount;
 		//TODO: Only produce the graphical output of the biggest component if the command line indicates that is desired.
-		LCMSMSRunner.GraphVizPrintComponent(LCMSMSRunner.LargestComponentIndex);
+		//LCMSMSRunner.GraphVizPrintComponent(LCMSMSRunner.LargestComponentIndex);
 		LCMSMSRunner=LCMSMSRunner.Next;
 	    }
 	}
@@ -837,7 +844,7 @@ namespace TDAuditor {
 	     */
 	    SimilarityLink SLRunner;
 	    ScanMetrics    SMRunner=this.ScansTable.Next;
-	    using (StreamWriter DOTFile = new StreamWriter(SourceFile + "-GraphViz.txt"))
+	    using (StreamWriter DOTFile = new StreamWriter(SourceFile + "-ConnectedComponent.txt"))
 	    {
 		DOTFile.WriteLine("graph LargestComponent {");
 		while (SMRunner != null)
@@ -884,6 +891,8 @@ namespace TDAuditor {
 	    {
 		SMRunner = LCMSMSRunner.ScansTable.Next;
 		Console.WriteLine("\tTagging {0}",LCMSMSRunner.SourceFile);
+		// StreamWriter DOTFile = new StreamWriter(LCMSMSRunner.SourceFile+ "-DeNovo.txt");
+		// DOTFile.WriteLine("graph DeNovo {");
 		while (SMRunner != null)
 		{
 		    /*
@@ -910,6 +919,7 @@ namespace TDAuditor {
 			    while (PRunner2 != null)
 			    {
 				double MassDiff = PRunner2.Mass - PRunner1.Mass;
+				int index = 0;
 				foreach (double ThisAA in ScanMetrics.AminoAcids)
 				{
 				    double MassError = Math.Abs(MassDiff - ThisAA);
@@ -921,18 +931,17 @@ namespace TDAuditor {
 					PRunner1.AALinks.Next = MGBuffer;
 					PRunner1.AALinks.NextPeak = PRunner2;
 					PRunner1.AALinks.ExpectedMass = ThisAA;
-					/*
-					Console.WriteLine("Gap between {0} and {1} for AA mass {2}",
-							  PRunner1.Mass, PRunner2.Mass, ThisAA);
-					*/
+					// DOTFile.WriteLine(Math.Round(PRunner1.Mass,3) + "--" + Math.Round(PRunner2.Mass,3) + " [label=\"" + ScanMetrics.AminoAcidSymbols[index] +"\"]");
 				    }
+				    index++;
 				}
 				PRunner2 = PRunner2.Next;
 			    }
 			    PRunner1 = PRunner1.Next;
 			}
 			/*
-			  Use recursion to seek the longest sequence for which each fragment exists.
+			  Use recursion to seek the longest sequence
+			  for which each consecutive fragment exists.
 			*/
 			PRunner1 = PeakList.Next;
 			while (PRunner1 != null)
@@ -946,13 +955,19 @@ namespace TDAuditor {
 			    PRunner1 = PRunner1.Next;
 			}
 			SMRunner.LongestTag=LongestTagSoFar;
+			if (LongestTagSoFar > LCMSMSExperiment.MaxLength) {
+			    LongestTagSoFar = LCMSMSExperiment.MaxLength;
+			}
+			LCMSMSRunner.LongestTagDistn[LongestTagSoFar]++;
 		    }
 		    SMRunner = SMRunner.Next;
 		}
+		// DOTFile.WriteLine("}");
+		// DOTFile.Flush();
 		LCMSMSRunner = LCMSMSRunner.Next;
 	    }
 	}
-	
+
 	public void WriteTextQCReport()
 	{
 	    /*
@@ -965,7 +980,12 @@ namespace TDAuditor {
 	    string delim = "\t";
 	    using (StreamWriter TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
 	    {
-		TSVbyRun.Write("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration\tMS1Count\tmzMLMSnCount\tmsAlignMSnCount\tmsAlignMSnCount0\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount\tmzMLPreZMin\tmzMLPreZMax\tmsAlignPreZMin\tmsAlignPreZMax\tblank\t");
+		TSVbyRun.Write("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration" +
+			       "\tMS1Count\tmzMLMSnCount\tmsAlignMSnWithPeaksCount\tmsAlignMSnWithoutPeaksCount\tmsAlignMSnWithPeaksFraction" +
+			       "\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount" +
+			       "\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount" +
+			       "\tmzMLPreZMin\tmzMLPreZMax\tmsAlignPreZMin\tmsAlignPreZQ1\tmsAlignPreZQ2\tmsAlignPreZQ3\tmsAlignPreZMax" +
+			       "\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tblank\t");
 		for (int i=0; i<=MaxZ; i++)
 		{
 		    TSVbyRun.Write("mzMLPreZ={0}\t",i);
@@ -975,9 +995,70 @@ namespace TDAuditor {
 		{
 		    TSVbyRun.Write("msAlignPreZ={0}\t",i);
 		}
+		TSVbyRun.Write("blank\t");
+		for (int i=0; i<=MaxLength; i++)
+		{
+		    TSVbyRun.Write("BestTagLength={0}\t",i);
+		}
 		TSVbyRun.WriteLine();
 		while (LCMSMSRunner != null)
 		{
+		    int PreZSum = 0;
+		    foreach(int Count in LCMSMSRunner.msAlignPrecursorZ)
+		    {
+			PreZSum += Count;
+		    }
+		    int ZQ1Count = PreZSum / 4;
+		    int ZQ2Count = PreZSum / 2;
+		    int ZQ3Count = ZQ1Count + ZQ2Count;
+		    int ZQuartile1 = 0;
+		    int ZQuartile2 = 0;
+		    int ZQuartile3 = 0;
+		    PreZSum = 0;
+		    int CurrentZ = 0;
+		    foreach(int Count in LCMSMSRunner.msAlignPrecursorZ)
+		    {
+			if(PreZSum < ZQ1Count && ZQ1Count <= (PreZSum + Count))
+			    ZQuartile1 = CurrentZ;
+			if(PreZSum < ZQ2Count && ZQ2Count <= (PreZSum + Count))
+			    ZQuartile2 = CurrentZ;
+			if(PreZSum < ZQ3Count && ZQ3Count <= (PreZSum + Count))
+			    ZQuartile3 = CurrentZ;
+			PreZSum += Count;
+			CurrentZ++;
+		    }
+		    //We need to distinguish between MS/MS that yield deconvolved mass lists and those that don't.
+		    int MSnCountWithPeaks = (LCMSMSRunner.msAlignMSnCount-LCMSMSRunner.msAlignMSnCount0);
+		    float MSnWithPeaksFraction = (float)MSnCountWithPeaks / (float)LCMSMSRunner.msAlignMSnCount;
+		    //We want the interquartiles of the best tag lengths.
+		    int TagLengthSum = 0;
+		    foreach(int Count in LCMSMSRunner.LongestTagDistn)
+		    {
+			TagLengthSum += Count;
+		    }
+		    int Q1Count = TagLengthSum / 4;
+		    int Q2Count = TagLengthSum / 2;
+		    int Q3Count = Q1Count+Q2Count;
+		    int LengthQ1 = 0;
+		    int LengthQ2 = 0;
+		    int LengthQ3 = 0;
+		    int LengthMax = 0;
+		    TagLengthSum = 0;
+		    int CurrentLength = 0;
+		    foreach(int Count in LCMSMSRunner.LongestTagDistn)
+		    {
+			if (Count > 0) LengthMax = CurrentLength;
+			if (TagLengthSum < Q1Count && Q1Count <= (TagLengthSum+Count))
+			    LengthQ1 = CurrentLength;
+			if (TagLengthSum < Q2Count && Q2Count <= (TagLengthSum+Count))
+			    LengthQ2 = CurrentLength;
+			if (TagLengthSum < Q3Count && Q3Count <= (TagLengthSum+Count))
+			    LengthQ3 = CurrentLength;
+			TagLengthSum += Count;
+			CurrentLength++;
+		    }
+
+		    // Actually write the metrics to the byRun file...
 		    TSVbyRun.Write(LCMSMSRunner.SourceFile + delim);
 		    TSVbyRun.Write(LCMSMSRunner.Instrument + delim);
 		    TSVbyRun.Write(LCMSMSRunner.SerialNumber + delim);
@@ -985,8 +1066,9 @@ namespace TDAuditor {
 		    TSVbyRun.Write(LCMSMSRunner.MaxScanStartTime + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLMS1Count + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLMSnCount + delim);
-		    TSVbyRun.Write(LCMSMSRunner.msAlignMSnCount + delim);
+		    TSVbyRun.Write(MSnCountWithPeaks + delim);
 		    TSVbyRun.Write(LCMSMSRunner.msAlignMSnCount0 + delim);
+		    TSVbyRun.Write(MSnWithPeaksFraction + delim);
 		    TSVbyRun.Write(LCMSMSRunner.Redundancy + delim);
 		    TSVbyRun.Write(LCMSMSRunner.HighestDegree + delim);
 		    TSVbyRun.Write(LCMSMSRunner.LargestComponentSize + delim);
@@ -1000,7 +1082,14 @@ namespace TDAuditor {
 		    TSVbyRun.Write(LCMSMSRunner.mzMLPrecursorZMin + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLPrecursorZMax + delim);
 		    TSVbyRun.Write(LCMSMSRunner.msAlignPrecursorZMin + delim);
+		    TSVbyRun.Write(ZQuartile1 + delim);
+		    TSVbyRun.Write(ZQuartile2 + delim);
+		    TSVbyRun.Write(ZQuartile3 + delim);
 		    TSVbyRun.Write(LCMSMSRunner.msAlignPrecursorZMax + delim);
+		    TSVbyRun.Write(LengthQ1 + delim);
+		    TSVbyRun.Write(LengthQ2 + delim);
+		    TSVbyRun.Write(LengthQ3 + delim);
+		    TSVbyRun.Write(LengthMax + delim);
 		    TSVbyRun.Write(delim);
 		    foreach(int charge in LCMSMSRunner.mzMLPrecursorZ)
 		    {
@@ -1010,6 +1099,11 @@ namespace TDAuditor {
 		    foreach(int charge in LCMSMSRunner.msAlignPrecursorZ)
 		    {
 			TSVbyRun.Write(charge + delim);
+		    }
+		    TSVbyRun.Write(delim);
+		    foreach(int Length in LCMSMSRunner.LongestTagDistn)
+		    {
+			TSVbyRun.Write(Length + delim);
 		    }
 		    TSVbyRun.WriteLine();
 		    LCMSMSRunner = LCMSMSRunner.Next;
@@ -1032,7 +1126,7 @@ namespace TDAuditor {
 			TSVbyScan.Write(SMRunner.mzMLPeakCount + delim);
 			TSVbyScan.Write(SMRunner.msAlignPeakCount + delim);
 			TSVbyScan.Write(SMRunner.Degree + delim);
-			TSVbyScan.Write(SMRunner.ComponentNumber+delim);
+			TSVbyScan.Write(SMRunner.ComponentNumber + delim);
 			TSVbyScan.WriteLine(SMRunner.LongestTag);
 			SMRunner = SMRunner.Next;
 		    }
