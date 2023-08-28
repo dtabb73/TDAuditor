@@ -15,7 +15,7 @@ namespace TDAuditor {
 	    CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 	    Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
 	    Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-	    Console.WriteLine("beta version 20230817");
+	    Console.WriteLine("beta version 20230828");
 
 	    /*
 	      TODO: Would like to have the following:
@@ -68,6 +68,7 @@ namespace TDAuditor {
 	    Raws.FindSimilarSpectraWithinRaw();
 	    Console.WriteLine("\nGenerating sequence tags...");
 	    Raws.GenerateSequenceTags();
+	    Raws.ComputeDistributions();
 	    Console.WriteLine("\nWriting TDAuditor-byRun and TDAuditor-byMSn TSV reports...");
 	    Raws.WriteTextQCReport();
 	}
@@ -83,9 +84,10 @@ namespace TDAuditor {
 		    LineBuffer=msAlign.ReadLine();
 		}
 	    }
-	    Console.Error.WriteLine("Could not determine source mzML from {0}.",PathAndFile);
-	    Environment.Exit(1);
-	    return "";
+	    //FLASHDeconv does not include FILE_NAME attributes.
+	    //Just cut "_ms2" off this file name and pass it back.
+	    string ThisFile = Path.GetFileNameWithoutExtension(PathAndFile);
+	    return ThisFile.Substring(0,ThisFile.Length-4);
 	}
     }
 
@@ -149,6 +151,7 @@ namespace TDAuditor {
 	public int    Degree=0;
 	public int    ComponentNumber=0;
 	public bool   Visited=false;
+	public int    AALinkCount=0;
 	public float  LongestTag=0;
 	public ScanMetrics Next = null;
 	public int    ScanNumber;
@@ -326,15 +329,19 @@ namespace TDAuditor {
 	// Charge state histograms
 	public static int MaxZ=100;
 	public static int MaxLength=50;
-	public static int MaxPkCount=1000;
-	public int[]  mzMLPrecursorZ        = new int[MaxZ+1];
-	public int[]  msAlignPrecursorZ     = new int[MaxZ+1];
+	public static int MaxPkCount=10000;
+	public int[]  mzMLPrecursorZDistn   = new int[MaxZ+1];
+	public int[]  mzMLPrecursorZQuartiles;
+	public int[]  msAlignPrecursorZDistn= new int[MaxZ+1];
+	public int[]  msAlignPrecursorZQuartiles;
+	public int[]  mzMLPeakCountDistn    = new int[MaxPkCount+1];
+	public int[]  mzMLPeakCountQuartiles;
 	public int[]  msAlignPeakCountDistn = new int[MaxPkCount+1];
+	public int[]  msAlignPeakCountQuartiles;
+	public int[]  AALinkCountDistn      = new int[MaxPkCount+1];
+	public int[]  AALinkCountQuartiles;
 	public int[]  LongestTagDistn       = new int[MaxLength+1];
-	public int    mzMLPrecursorZMin=MaxZ;
-	public int    mzMLPrecursorZMax=0;
-	public int    msAlignPrecursorZMin=MaxZ;
-	public int    msAlignPrecursorZMax=0;
+	public int[]  LongestTagQuartiles;
 	// Per-scan metrics
 	public  ScanMetrics ScansTable = new ScanMetrics();
 	private ScanMetrics ScansRunner;
@@ -506,6 +513,10 @@ namespace TDAuditor {
 				    ScansRunner = ScansRunner.Next;
 				    ScansRunner.NativeID = LastNativeID;
 				    ScansRunner.mzMLPeakCount = LastPeakCount;
+				    if (LastPeakCount > MaxPkCount)
+					mzMLPeakCountDistn[MaxPkCount]++;
+				    else
+					mzMLPeakCountDistn[LastPeakCount]++;
 				    ThisScanIsCID = false;
 				    ThisScanIsHCD = false;
 				    ThisScanIsECD = false;
@@ -517,10 +528,8 @@ namespace TDAuditor {
 				string ThisCharge = Xread.GetAttribute("value");
 				int    ThisChargeInt = int.Parse(ThisCharge);
 				ScansRunner.mzMLPrecursorZ = ThisChargeInt;
-				if (ThisChargeInt < mzMLPrecursorZMin) mzMLPrecursorZMin = ThisChargeInt;
-				if (ThisChargeInt > mzMLPrecursorZMax) mzMLPrecursorZMax = ThisChargeInt;
 				try {
-				    mzMLPrecursorZ[ThisChargeInt]++;
+				    mzMLPrecursorZDistn[ThisChargeInt]++;
 				}
 				catch (IndexOutOfRangeException) {
 				    Console.Error.WriteLine("Maximum charge of {0} is less than mzML charge {1}.",MaxZ,ThisChargeInt);
@@ -647,10 +656,8 @@ namespace TDAuditor {
 			    case "PRECURSOR_CHARGE":
 				NumberFromString = int.Parse(Tokens[1]);
 				ScanRunner.msAlignPrecursorZ = NumberFromString;
-				if (NumberFromString < this.msAlignPrecursorZMin) this.msAlignPrecursorZMin = NumberFromString;
-				if (NumberFromString > this.msAlignPrecursorZMax) this.msAlignPrecursorZMax = NumberFromString;
 				try {
-				    this.msAlignPrecursorZ[NumberFromString]++;
+				    this.msAlignPrecursorZDistn[NumberFromString]++;
 				}
 				catch (IndexOutOfRangeException) {
 				    Console.Error.WriteLine("Maximum charge of {0} is less than msAlign charge {1}.",MaxZ,NumberFromString);
@@ -717,7 +724,6 @@ namespace TDAuditor {
 	    int              NonVacantScanCount;
 	    int              LinkCount;
 	    ScanMetrics.ComputeLogFactorials();
-	    // TODO: Employ a ThreadPool to use multi-core processing.
 	    while (LCMSMSRunner != null) {
 		ScanMetrics SMRunner = LCMSMSRunner.ScansTable.Next;
 		NonVacantScanCount=0;
@@ -887,8 +893,6 @@ namespace TDAuditor {
 	      determine the length of the longest possible tag
 	      stringing together those gaps.
 	     */
-	    // TODO: Employ a ThreadPool to use multi-core processing.
-	    // TODO: Why does 20170309_ksn5514_FACS_BC_RP4H_10547771_D1_B_SEP_tech_rep_01 still suck on runtime?
 	    LCMSMSExperiment LCMSMSRunner = this.Next;
 	    ScanMetrics      SMRunner;
 	    MSMSPeak         PeakList;
@@ -936,6 +940,7 @@ namespace TDAuditor {
 				    if (MassError < ScanMetrics.FragmentTolerance)
 				    {
 					// ThisAA corresponds in mass to the separation between these two peaks
+					SMRunner.AALinkCount++;
 					MGBuffer = PRunner1.AALinks;
 					PRunner1.AALinks = new MassGap();
 					PRunner1.AALinks.Next = MGBuffer;
@@ -949,6 +954,10 @@ namespace TDAuditor {
 			    }
 			    PRunner1 = PRunner1.Next;
 			}
+			if (SMRunner.AALinkCount > LCMSMSExperiment.MaxPkCount)
+			    LCMSMSRunner.AALinkCountDistn[MaxPkCount]++;
+			else
+			    LCMSMSRunner.AALinkCountDistn[SMRunner.AALinkCount]++;
 			//DOTFile.WriteLine("}");
 			//DOTFile.Flush();
 			/*
@@ -993,6 +1002,56 @@ namespace TDAuditor {
 	    }
 	}
 
+	public int[] QuartilesOf (int[] Histogram)
+	{
+	    int[] Quartiles = new int[5];
+	    int Sum = 0;
+	    int index;
+	    bool AwaitingMin=true;
+	    for (index = 0; index < Histogram.Length; index++)
+	    {
+		if (AwaitingMin && Histogram[index] > 0)
+		{
+		    AwaitingMin = false;
+		    Quartiles[0]=index;
+		}
+		if (Histogram[index] > 0)
+		    Quartiles[4]=index;
+		Sum += Histogram[index];
+	    }
+	    int CountQ1 = Sum / 4;
+	    int CountQ2 = Sum / 2;
+	    int CountQ3 = CountQ1+CountQ2;
+	    Sum = 0;
+	    for (index = 0; index < Histogram.Length; index++)
+	    {
+		int ThisCount = Histogram[index];
+		if(Sum < CountQ1 && CountQ1 <= (Sum + ThisCount))
+		    Quartiles[1] = index;
+		if(Sum < CountQ2 && CountQ2 <= (Sum + ThisCount))
+		    Quartiles[2] = index;
+		if(Sum < CountQ3 && CountQ3 <= (Sum + ThisCount))
+		    Quartiles[3] = index;
+		Sum += ThisCount;
+	    }
+	    return Quartiles;
+	}
+
+	public void ComputeDistributions()
+	{
+	    LCMSMSExperiment LCMSMSRunner = this.Next;
+	    while (LCMSMSRunner != null)
+	    {
+		LCMSMSRunner.mzMLPrecursorZQuartiles    = QuartilesOf(LCMSMSRunner.mzMLPrecursorZDistn);
+		LCMSMSRunner.msAlignPrecursorZQuartiles = QuartilesOf(LCMSMSRunner.msAlignPrecursorZDistn);
+		LCMSMSRunner.mzMLPeakCountQuartiles     = QuartilesOf(LCMSMSRunner.mzMLPeakCountDistn);
+		LCMSMSRunner.msAlignPeakCountQuartiles  = QuartilesOf(LCMSMSRunner.msAlignPeakCountDistn);
+		LCMSMSRunner.AALinkCountQuartiles       = QuartilesOf(LCMSMSRunner.AALinkCountDistn);
+		LCMSMSRunner.LongestTagQuartiles        = QuartilesOf(LCMSMSRunner.LongestTagDistn);
+		LCMSMSRunner = LCMSMSRunner.Next;
+	    }
+	}
+	
 	public void WriteTextQCReport()
 	{
 	    /*
@@ -1005,111 +1064,22 @@ namespace TDAuditor {
 	    string delim = "\t";
 	    using (StreamWriter TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
 	    {
-		TSVbyRun.Write("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration" +
+		TSVbyRun.WriteLine("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration" +
 			       "\tMS1Count\tmzMLMSnCount\tmsAlignMSnWithPeaksCount\tmsAlignMSnWithoutPeaksCount\tmsAlignMSnWithPeaksFraction" +
 			       "\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount" +
 			       "\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount" +
-			       "\tmzMLPreZMin\tmzMLPreZMax\tmsAlignPreZMin\tmsAlignPreZQ1\tmsAlignPreZQ2\tmsAlignPreZQ3\tmsAlignPreZMax" +
-			       "\tmsAlignPkCountQ1\tmsAlignPkCountQ2\tmsAlignPkCountQ3\tmsAlignPkCountMax" +
-			       "\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tblank\t");
-		for (int i=0; i<=MaxZ; i++)
-		{
-		    TSVbyRun.Write("mzMLPreZ={0}\t",i);
-		}
-		TSVbyRun.Write("blank\t");
-		for (int i=0; i<=MaxZ; i++)
-		{
-		    TSVbyRun.Write("msAlignPreZ={0}\t",i);
-		}
-		TSVbyRun.Write("blank\t");
-		for (int i=0; i<=MaxLength; i++)
-		{
-		    TSVbyRun.Write("BestTagLength={0}\t",i);
-		}
-		TSVbyRun.WriteLine();
+			       "\tmzMLPreZMin\tmzMLPreZQ1\tmzMLPreZQ2\tmzMLPreZQ3\tmzMLPreZMax"+
+			       "\tmsAlignPreZMin\tmsAlignPreZQ1\tmsAlignPreZQ2\tmsAlignPreZQ3\tmsAlignPreZMax"+
+			       "\tmzMLPeakCountMin\tmzMLPeakCountQ1\tmzMLPeakCountQ2\tmzMLPeakCountQ3\tmzMLPeakCountMax"+
+			       "\tmsAlignPeakCountMin\tmsAlignPeakCountQ1\tmsAlignPeakCountQ2\tmsAlignPeakCountQ3\tmsAlignPeakCountMax"+
+			       "\tAALinkCountMin\tAALinkCountQ1\tAALinkCountQ2\tAALinkCountQ3\tAALinkCountMax"+
+			       "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tblank");
 		while (LCMSMSRunner != null)
 		{
-		    int PreZSum = 0;
-		    foreach(int Count in LCMSMSRunner.msAlignPrecursorZ)
-		    {
-			PreZSum += Count;
-		    }
-		    int ZQ1Count = PreZSum / 4;
-		    int ZQ2Count = PreZSum / 2;
-		    int ZQ3Count = ZQ1Count + ZQ2Count;
-		    int ZQuartile1 = 0;
-		    int ZQuartile2 = 0;
-		    int ZQuartile3 = 0;
-		    PreZSum = 0;
-		    int CurrentZ = 0;
-		    foreach(int Count in LCMSMSRunner.msAlignPrecursorZ)
-		    {
-			if(PreZSum < ZQ1Count && ZQ1Count <= (PreZSum + Count))
-			    ZQuartile1 = CurrentZ;
-			if(PreZSum < ZQ2Count && ZQ2Count <= (PreZSum + Count))
-			    ZQuartile2 = CurrentZ;
-			if(PreZSum < ZQ3Count && ZQ3Count <= (PreZSum + Count))
-			    ZQuartile3 = CurrentZ;
-			PreZSum += Count;
-			CurrentZ++;
-		    }
 		    //We need to distinguish between MS/MS that yield deconvolved mass lists and those that don't.
 		    int MSnCountWithPeaks = (LCMSMSRunner.msAlignMSnCount-LCMSMSRunner.msAlignMSnCount0);
-		    float MSnWithPeaksFraction = (float)MSnCountWithPeaks / (float)LCMSMSRunner.msAlignMSnCount;
-		    //We want the interquartiles of the best tag lengths.
-		    int TagLengthSum = 0;
-		    foreach(int Count in LCMSMSRunner.LongestTagDistn)
-		    {
-			TagLengthSum += Count;
-		    }
-		    int Q1Count = TagLengthSum / 4;
-		    int Q2Count = TagLengthSum / 2;
-		    int Q3Count = Q1Count+Q2Count;
-		    int LengthQ1 = 0;
-		    int LengthQ2 = 0;
-		    int LengthQ3 = 0;
-		    int LengthMax = 0;
-		    TagLengthSum = 0;
-		    int CurrentLength = 0;
-		    foreach(int Count in LCMSMSRunner.LongestTagDistn)
-		    {
-			if (Count > 0) LengthMax = CurrentLength;
-			if (TagLengthSum < Q1Count && Q1Count <= (TagLengthSum+Count))
-			    LengthQ1 = CurrentLength;
-			if (TagLengthSum < Q2Count && Q2Count <= (TagLengthSum+Count))
-			    LengthQ2 = CurrentLength;
-			if (TagLengthSum < Q3Count && Q3Count <= (TagLengthSum+Count))
-			    LengthQ3 = CurrentLength;
-			TagLengthSum += Count;
-			CurrentLength++;
-		    }
-		    //We want the interquartiles for the numbers of peaks found in the msAlign mass lists
-		    int PkCountQ1 = 0;
-		    int PkCountQ2 = 0;
-		    int PkCountQ3 = 0;
-		    int PkCountMax = 0;
-		    int PkCountSum = 0;
-		    int ThisPkCount;
-		    foreach(int Count in LCMSMSRunner.msAlignPeakCountDistn)
-		    {
-			PkCountSum += Count;
-		    }
-		    Q1Count = PkCountSum / 4;
-		    Q2Count = PkCountSum / 2;
-		    Q3Count = Q1Count+Q2Count;
-		    PkCountSum = 0;
-		    for (int PkCountIndex=0; PkCountIndex <= MaxPkCount; PkCountIndex++)
-		    {
-			ThisPkCount = LCMSMSRunner.msAlignPeakCountDistn[PkCountIndex];
-			if (ThisPkCount > 0) PkCountMax = PkCountIndex;
-			if (PkCountSum < Q1Count && Q1Count <= (PkCountSum+ThisPkCount))
-			    PkCountQ1 = PkCountIndex;
-			if (PkCountSum < Q2Count && Q2Count <= (PkCountSum+ThisPkCount))
-			    PkCountQ2 = PkCountIndex;
-			if (PkCountSum < Q3Count && Q3Count <= (PkCountSum+ThisPkCount))
-			    PkCountQ3 = PkCountIndex;
-			PkCountSum += ThisPkCount;
-		    }
+		    //What fraction of all collected MS/MS scans yielded a non-empty peaklist in deconvolution?
+		    float MSnWithPeaksFraction = (float)MSnCountWithPeaks / (float)LCMSMSRunner.mzMLMSnCount;
 		    // Actually write the metrics to the byRun file...
 		    TSVbyRun.Write(LCMSMSRunner.SourceFile + delim);
 		    TSVbyRun.Write(LCMSMSRunner.Instrument + delim);
@@ -1131,36 +1101,18 @@ namespace TDAuditor {
 		    TSVbyRun.Write(LCMSMSRunner.mzMLECDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLEThcDCount + delim);
 		    TSVbyRun.Write(LCMSMSRunner.mzMLETciDCount + delim);
-		    TSVbyRun.Write(LCMSMSRunner.mzMLPrecursorZMin + delim);
-		    TSVbyRun.Write(LCMSMSRunner.mzMLPrecursorZMax + delim);
-		    TSVbyRun.Write(LCMSMSRunner.msAlignPrecursorZMin + delim);
-		    TSVbyRun.Write(ZQuartile1 + delim);
-		    TSVbyRun.Write(ZQuartile2 + delim);
-		    TSVbyRun.Write(ZQuartile3 + delim);
-		    TSVbyRun.Write(LCMSMSRunner.msAlignPrecursorZMax + delim);
-		    TSVbyRun.Write(PkCountQ1 + delim);
-		    TSVbyRun.Write(PkCountQ2 + delim);
-		    TSVbyRun.Write(PkCountQ3 + delim);
-		    TSVbyRun.Write(PkCountMax + delim);
-		    TSVbyRun.Write(LengthQ1 + delim);
-		    TSVbyRun.Write(LengthQ2 + delim);
-		    TSVbyRun.Write(LengthQ3 + delim);
-		    TSVbyRun.Write(LengthMax + delim);
-		    TSVbyRun.Write(delim);
-		    foreach(int charge in LCMSMSRunner.mzMLPrecursorZ)
-		    {
-			TSVbyRun.Write(charge + delim);
-		    }
-		    TSVbyRun.Write(delim);
-		    foreach(int charge in LCMSMSRunner.msAlignPrecursorZ)
-		    {
-			TSVbyRun.Write(charge + delim);
-		    }
-		    TSVbyRun.Write(delim);
-		    foreach(int Length in LCMSMSRunner.LongestTagDistn)
-		    {
-			TSVbyRun.Write(Length + delim);
-		    }
+		    foreach (int ThisQuartile in LCMSMSRunner.mzMLPrecursorZQuartiles)
+			TSVbyRun.Write(ThisQuartile + delim);
+		    foreach (int ThisQuartile in LCMSMSRunner.msAlignPrecursorZQuartiles)
+			TSVbyRun.Write(ThisQuartile + delim);
+		    foreach (int ThisQuartile in LCMSMSRunner.mzMLPeakCountQuartiles)
+			TSVbyRun.Write(ThisQuartile + delim);
+		    foreach (int ThisQuartile in LCMSMSRunner.msAlignPeakCountQuartiles)
+			TSVbyRun.Write(ThisQuartile + delim);
+		    foreach (int ThisQuartile in LCMSMSRunner.AALinkCountQuartiles)
+			TSVbyRun.Write(ThisQuartile + delim);
+		    foreach (int ThisQuartile in LCMSMSRunner.LongestTagQuartiles)
+			TSVbyRun.Write(ThisQuartile + delim);
 		    TSVbyRun.WriteLine();
 		    LCMSMSRunner = LCMSMSRunner.Next;
 		}
@@ -1168,12 +1120,13 @@ namespace TDAuditor {
 	    LCMSMSRunner = this.Next;
 	    using (StreamWriter TSVbyScan = new StreamWriter("TDAuditor-byMSn.tsv"))
 	    {
-		TSVbyScan.WriteLine("SourceFile\tNativeID\tScanStartTime\tmzMLDissociation\tmzMLPrecursorZ\tmsAlignPrecursorZ\tmsAlignPrecursorMass\tmzMLPeakCount\tmsAlignPeakCount\tDegree\tComponentNumber\tLongestTag");
+		TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tmzMLPrecursorZ\tmsAlignPrecursorZ\tmsAlignPrecursorMass\tmzMLPeakCount\tmsAlignPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
 		while (LCMSMSRunner != null) {
 		    ScanMetrics SMRunner = LCMSMSRunner.ScansTable.Next;
 		    while (SMRunner != null) {
 			TSVbyScan.Write(LCMSMSRunner.SourceFile + delim);
 			TSVbyScan.Write(SMRunner.NativeID + delim);
+			TSVbyScan.Write(SMRunner.ScanNumber + delim);
 			TSVbyScan.Write(SMRunner.ScanStartTime + delim);
 			TSVbyScan.Write(SMRunner.mzMLDissociation + delim);
 			TSVbyScan.Write(SMRunner.mzMLPrecursorZ + delim);
@@ -1183,6 +1136,7 @@ namespace TDAuditor {
 			TSVbyScan.Write(SMRunner.msAlignPeakCount + delim);
 			TSVbyScan.Write(SMRunner.Degree + delim);
 			TSVbyScan.Write(SMRunner.ComponentNumber + delim);
+			TSVbyScan.Write(SMRunner.AALinkCount + delim);
 			TSVbyScan.WriteLine(SMRunner.LongestTag);
 			SMRunner = SMRunner.Next;
 		    }
