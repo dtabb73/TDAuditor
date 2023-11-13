@@ -7,13 +7,16 @@ namespace TDAuditor
 {
     static class Program
     {
-        static void Main()
+        static void Main(string[] args)
         {
             // Use periods to separate decimals
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20230915");
+            Console.WriteLine("beta version 20231113");
+	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
+	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
+	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
 
             /*
               TODO: Would like to have the following:
@@ -21,6 +24,27 @@ namespace TDAuditor
               -What is the max resolution seen for MSn scans?
             */
 
+	    var ReadMGFnotMSAlign = false;
+	    var WriteConnectedComponents = false;
+	    var WriteDeNovoTags = false;
+	    foreach (var item in args)
+	    {
+		switch(item)
+		{
+		    case "--MGF":
+			ReadMGFnotMSAlign = true;
+			break;
+		    case "--CC":
+			WriteConnectedComponents = true;
+			break;
+		    case "--DN":
+			WriteDeNovoTags = true;
+			break;
+		    default:
+			Console.Error.WriteLine("\tError: I don't understand this argument: {0}.", item);
+			break;
+		}
+	    }
             var CWD = Directory.GetCurrentDirectory();
             const string mzMLPattern = "*.mzML";
             const string msAlignPattern = "*ms2.msalign";
@@ -65,9 +89,9 @@ namespace TDAuditor
               lack corresponding msAlign files.
              */
             Console.WriteLine("\nSeeking MS/MS scan pairs with many shared masses...");
-            Raws.FindSimilarSpectraWithinRaw();
+            Raws.FindSimilarSpectraWithinRaw(WriteConnectedComponents);
             Console.WriteLine("\nGenerating sequence tags...");
-            Raws.GenerateSequenceTags();
+            Raws.GenerateSequenceTags(WriteDeNovoTags);
             Raws.ComputeDistributions();
             Console.WriteLine("\nWriting TDAuditor-byRun and TDAuditor-byMSn TSV reports...");
             Raws.WriteTextQCReport();
@@ -105,8 +129,9 @@ namespace TDAuditor
     class MassGap
     {
         public MSMSPeak NextPeak;
-        public double ExpectedMass;
-        public MassGap Next;
+        public double   ExpectedMass;
+	public int      AANumber;
+        public MassGap  Next;
 
         public int DepthTagSearch()
         {
@@ -168,7 +193,8 @@ namespace TDAuditor
         public static double[] AminoAcids = {57.02146,71.03711,87.03203,97.05276,99.06841,101.04768,103.00919,113.08406,114.04293,
                           115.02694,128.05858,128.09496,129.04259,131.04049,137.05891,147.06841,156.10111,
                           163.06333,186.07931};
-        public static string[] AminoAcidSymbols = { "G", "A", "S", "P", "V", "T", "C", "L/I", "N", "D", "Q", "K", "E", "M", "H", "F", "R", "Y", "W" };
+        public static string[] AminoAcidSymbols = { "G", "A", "S", "P", "V", "T", "C", "L/I", "N",
+						    "D", "Q", "K", "E", "M", "H", "F", "R", "Y", "W" };
 
         public static void ComputeLogFactorials()
         {
@@ -243,7 +269,9 @@ namespace TDAuditor
                 var CombB = MatchesSoFar;
                 var CombC = NumberOfPossibleMasses;
                 var CombD = Other.msAlignPeakCount;
-                var LPSum = ComputeLogCombinationCount(CombA, CombB) + ComputeLogCombinationCount(CombC - CombA, CombD - CombB) - ComputeLogCombinationCount(CombC, CombD);
+                var LPSum = ComputeLogCombinationCount(CombA, CombB) +
+		    ComputeLogCombinationCount(CombC - CombA, CombD - CombB) -
+		    ComputeLogCombinationCount(CombC, CombD);
                 var MostMatchesPossible = Math.Min(this.msAlignPeakCount, Other.msAlignPeakCount);
                 /*
                   At the moment, LPSum equals the log probability of
@@ -253,7 +281,9 @@ namespace TDAuditor
                  */
                 for (var MoreMatches = MatchesSoFar + 1; MoreMatches <= MostMatchesPossible; MoreMatches++)
                 {
-                    LPSum = sum_log_prob(LPSum, ComputeLogCombinationCount(CombA, MoreMatches) + ComputeLogCombinationCount(CombC - CombA, CombD - MoreMatches) - ComputeLogCombinationCount(CombC, CombD));
+                    LPSum = sum_log_prob(LPSum, ComputeLogCombinationCount(CombA, MoreMatches) +
+					 ComputeLogCombinationCount(CombC - CombA, CombD - MoreMatches) -
+					 ComputeLogCombinationCount(CombC, CombD));
                 }
                 var NegLogProbability = -LPSum;
                 return NegLogProbability;
@@ -466,6 +496,9 @@ namespace TDAuditor
                             case "MS:1002523":
                             case "MS:1002732":
                             case "MS:1003029":
+			    case "MS:1003123":
+			    case "MS:1003293":
+			    case "MS:1003094":
                                 Instrument = Xread.GetAttribute("name");
                                 break;
                             case "MS:1000529":
@@ -585,10 +618,20 @@ namespace TDAuditor
             var SRunner = this.ScansTable.Next;
             while (SRunner != null)
             {
-                // Example of Thermo NativeID: controllerType=0 controllerNumber=1 scan=12
+                // Example of Thermo NativeID: controllerType=0 controllerNumber=1 scan=12 (ProteoWizard)
+                // Example of SCIEX NativeID: sample=1 period=1 cycle=806 experiment=2 (ProteoWizard)
+		// Example of SCIEX NativeID: sample=1 period=1 cycle=7207 experiment=1 (SCIEX MS Data Converter)
+                // Example of Bruker NativeID: scan=55 (TIMSConvert)
+                // Example of Bruker NativeID: merged=102 frame=13 scanStart=810 scanEnd=834 (ProteoWizard)
                 var Tokens = SRunner.NativeID.Split(' ');
-                var Tokens2 = Tokens[2].Split('=');
-                SRunner.ScanNumber = int.Parse(Tokens2[1]);
+		foreach (var ThisTerm in Tokens)
+		{
+		    var Tokens2 = ThisTerm.Split('=');
+		    if ( Tokens2[0].Equals("cycle") || Tokens2[0].Equals("scan") || Tokens2[0].Equals("scanStart") )
+		    {
+			SRunner.ScanNumber = int.Parse(Tokens2[1]);
+		    }
+		}
                 SRunner = SRunner.Next;
             }
         }
@@ -721,7 +764,7 @@ namespace TDAuditor
             }
         }
 
-        public void FindSimilarSpectraWithinRaw()
+        public void FindSimilarSpectraWithinRaw(bool WriteConnectedComponents)
         {
             var LCMSMSRunner = this.Next;
             ScanMetrics.ComputeLogFactorials();
@@ -839,8 +882,11 @@ namespace TDAuditor
                     SMRunner = SMRunner.Next;
                 }
                 LCMSMSRunner.ComponentCount = ComponentCount;
-                //TODO: Only produce the graphical output of the biggest component if the command line indicates that is desired.
-                LCMSMSRunner.GraphVizPrintComponent(LCMSMSRunner.LargestComponentIndex);
+                //Only produce the graphical output of the biggest component if the command line indicates that is desired.
+		if (WriteConnectedComponents)
+		{
+		    LCMSMSRunner.GraphVizPrintComponent(LCMSMSRunner.LargestComponentIndex);
+		}
                 // Cleanup memory.
                 SMRunner = LCMSMSRunner.ScansTable.Next;
                 while (SMRunner != null)
@@ -889,7 +935,7 @@ namespace TDAuditor
             }
         }
 
-        public void GenerateSequenceTags()
+        public void GenerateSequenceTags(bool WriteDeNovoTags)
         {
             /*
               What is the longest sequence we can "read" from the
@@ -924,8 +970,6 @@ namespace TDAuditor
                         /*
                           Find the gaps corresponding to amino acid masses.
                         */
-                        //StreamWriter DOTFile = new StreamWriter(LCMSMSRunner.SourceFile + "-" + SMRunner.ScanNumber + "-DeNovo.txt");
-                        //DOTFile.WriteLine("graph DeNovo {");
                         PRunner1 = PeakList.Next;
                         MassGap MGBuffer;
                         while (PRunner1 != null)
@@ -947,7 +991,7 @@ namespace TDAuditor
                                         PRunner1.AALinks.Next = MGBuffer;
                                         PRunner1.AALinks.NextPeak = PRunner2;
                                         PRunner1.AALinks.ExpectedMass = ThisAA;
-                                        //DOTFile.WriteLine(Math.Round(PRunner1.Mass,3) + "--" + Math.Round(PRunner2.Mass,3) + " [label=\"" + ScanMetrics.AminoAcidSymbols[index] +"\"]");
+					PRunner1.AALinks.AANumber = index;
                                     }
                                     index++;
                                 }
@@ -959,8 +1003,24 @@ namespace TDAuditor
                             LCMSMSRunner.AALinkCountDistn[MaxPkCount]++;
                         else
                             LCMSMSRunner.AALinkCountDistn[SMRunner.AALinkCount]++;
-                        //DOTFile.WriteLine("}");
-                        //DOTFile.Flush();
+			if (WriteDeNovoTags)
+			{
+			    StreamWriter DOTFile = new StreamWriter(LCMSMSRunner.SourceFile + "-" + SMRunner.ScanNumber + "-DeNovo.txt");
+			    DOTFile.WriteLine("graph DeNovo {");
+			    PRunner1 = PeakList.Next;
+			    while (PRunner1 != null)
+			    {
+				MGBuffer = PRunner1.AALinks;
+				while (MGBuffer != null)
+				{
+				    DOTFile.WriteLine(Math.Round(PRunner1.Mass,3) + "--" + Math.Round(MGBuffer.NextPeak.Mass,3) + " [label=\"" + ScanMetrics.AminoAcidSymbols[MGBuffer.AANumber] +"\"]");
+				    MGBuffer = MGBuffer.Next;
+				}
+				PRunner1 = PRunner1.Next;
+			    }
+			    DOTFile.WriteLine("}");
+			    DOTFile.Flush();
+			}
                         /*
                           Use recursion to seek the longest sequence
                           for which each consecutive fragment exists.
