@@ -13,7 +13,7 @@ namespace TDAuditor
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20231113");
+            Console.WriteLine("beta version 20231114");
 	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
 	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
 	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -47,9 +47,11 @@ namespace TDAuditor
 	    }
             var CWD = Directory.GetCurrentDirectory();
             const string mzMLPattern = "*.mzML";
-            const string msAlignPattern = "*ms2.msalign";
             var mzMLs = Directory.GetFiles(CWD, mzMLPattern);
+            const string msAlignPattern = "*ms2.msalign";
             var msAligns = Directory.GetFiles(CWD, msAlignPattern);
+            const string mgfPattern = "*.mgf";
+            var MGFs = Directory.GetFiles(CWD, mgfPattern);
             var Raws = new LCMSMSExperiment();
             var RawsRunner = Raws;
             string Basename;
@@ -67,27 +69,41 @@ namespace TDAuditor
                 RawsRunner.ReadFromMZML(XMLfile);
                 RawsRunner.ParseScanNumbers();
             }
-            // TODO: The following will run into a problem if user has created a conjoint ms2.msalign file in TopPIC
-            Console.WriteLine("\nImporting from msAlign files...");
-            foreach (var current in msAligns)
-            {
-                Basename = Path.GetFileNameWithoutExtension(current);
-                Console.WriteLine("\tReading msAlign {0}", Basename);
-                var SourcemzML = SniffMSAlignForSource(current);
-                var CorrespondingRaw = Raws.Find(SourcemzML);
-                if (CorrespondingRaw == null)
-                {
-                    Console.Error.WriteLine("\tWARNING: {0} could not be matched to an mzML title.", Basename);
-                }
-                else
-                {
-                    CorrespondingRaw.ReadFromMSAlign(current);
-                }
-            }
-            /*
-              TODO: we should really check to see if any of the mzMLs
-              lack corresponding msAlign files.
-             */
+	    if (ReadMGFnotMSAlign == true)
+	    {
+		Console.WriteLine("\nImporting from ProSight PD MGF...");
+		foreach (var current in MGFs)
+		{
+		    Basename = Path.GetFileNameWithoutExtension(current);
+		    Console.WriteLine("\tReading MGF {0}", Basename);
+		    Raws.ReadFromMGF(current);
+		}
+		Raws.UpdateAllmsAlignStats();
+	    }
+	    else
+	    {
+		// TODO: The following will run into a problem if user has created a conjoint ms2.msalign file in TopPIC
+		Console.WriteLine("\nImporting from msAlign files...");
+		foreach (var current in msAligns)
+		{
+		    Basename = Path.GetFileNameWithoutExtension(current);
+		    Console.WriteLine("\tReading msAlign {0}", Basename);
+		    var SourcemzML = SniffMSAlignForSource(current);
+		    var CorrespondingRaw = Raws.Find(SourcemzML);
+		    if (CorrespondingRaw == null)
+		    {
+			Console.Error.WriteLine("\tWARNING: {0} could not be matched to an mzML title.", Basename);
+		    }
+		    else
+		    {
+			CorrespondingRaw.ReadFromMSAlign(current);
+		    }
+		}
+		/*
+		  TODO: we should really check to see if any of the mzMLs
+		  lack corresponding msAlign files.
+		*/
+	    }
             Console.WriteLine("\nSeeking MS/MS scan pairs with many shared masses...");
             Raws.FindSimilarSpectraWithinRaw(WriteConnectedComponents);
             Console.WriteLine("\nGenerating sequence tags...");
@@ -279,12 +295,14 @@ namespace TDAuditor
                   the probabilities for cases with more peaks matching
                   than this.
                  */
+		/*
                 for (var MoreMatches = MatchesSoFar + 1; MoreMatches <= MostMatchesPossible; MoreMatches++)
                 {
                     LPSum = sum_log_prob(LPSum, ComputeLogCombinationCount(CombA, MoreMatches) +
 					 ComputeLogCombinationCount(CombC - CombA, CombD - MoreMatches) -
 					 ComputeLogCombinationCount(CombC, CombD));
                 }
+		*/
                 var NegLogProbability = -LPSum;
                 return NegLogProbability;
             }
@@ -647,7 +665,174 @@ namespace TDAuditor
             }
             return null;
         }
+	
+	public void ReadFromMGF(string PathAndFileName)
+	{
+	    using (var MGFFile = new StreamReader(PathAndFileName))
+	    {
+		var LineBuffer = MGFFile.ReadLine();
+		var LastBasename = "";
+		double LastMass=0;
+		LCMSMSExperiment RawRunner = this;
+		ScanMetrics ScanRunner = null;
+		MSMSPeak PeakList = null;
+		MSMSPeak PeakRunner = null;
+		while (LineBuffer != null)
+		{
+                    string[] Tokens;
+		    string[] SemiTokens;
+                    if (LineBuffer.Contains("="))
+                    {
+                        Tokens = LineBuffer.Split('=');
+                        int NumberFromString;
+                        switch (Tokens[0])
+                        {
+                            case "TITLE":
+				SemiTokens = Tokens[1].Split('\"');
+				var Basename = Path.GetFileNameWithoutExtension(SemiTokens[1]);
+				var Scan = SemiTokens[7];
+				if (!LastBasename.Equals(Basename))
+				{
+				    Console.WriteLine("\t\tHandling spectra from {0}",Basename);
+				    LastBasename = Basename;
+				}
+				//Now advance our runners to the corresponding scan in the corresponding RAW...
+				RawRunner = this.Find(Basename);
+				if (RawRunner == null)
+				{
+				    Console.Error.WriteLine("Error!  Could not find {0} among mzMLs.",Basename);
+				}
+				else
+				{
+				    try {
+					NumberFromString = int.Parse(Scan);
+					PeakList = new MSMSPeak();
+					PeakRunner = PeakList;
+					ScanRunner = RawRunner.GoToScan(NumberFromString);
+					if (ScanRunner == null) Console.Error.WriteLine("Error!  Could not find scan {0}.",NumberFromString);
+				    }
+				    catch (FormatException) {
+					Console.Error.WriteLine("Scan number could not be parsed from {0}", LineBuffer);
+				    }
+				}
+				break;
+			    case "PEPMASS":
+				SemiTokens = Tokens[1].Split(' ');
+				try {
+				    LastMass = double.Parse(SemiTokens[0], CultureInfo.InvariantCulture);
+				}
+				catch (FormatException) {
+				    Console.Error.WriteLine("Mass could not be parsed from {0}", LineBuffer);
+				}
+				break;
+			    case "CHARGE":
+				SemiTokens = Tokens[1].Split(new Char[] {'+','-'});
+				try {
+				    NumberFromString = int.Parse(SemiTokens[0]);
+				    if ((RawRunner != null) && (ScanRunner != null))
+				    {
+					// We want to the final precursor charge for each scan to be the highest of multiple possibilities that Xtract puts forward.
+					if (NumberFromString > ScanRunner.msAlignPrecursorZ)
+					{
+					    ScanRunner.msAlignPrecursorZ = NumberFromString;
+					    ScanRunner.msAlignPrecursorMass = LastMass;
+					}
+				    }
+				}
+				catch (FormatException) {
+				    Console.Error.WriteLine("Charge could not be parsed from {0}", LineBuffer);
+				}
+				break;
+			    default:
+				break;
+			}
+		    }
+		    else if (LineBuffer.Length > 0 && char.IsDigit(LineBuffer[0]))
+		    {
+			//This is a line containing a deconvolved mass, intensity, and original charge, delimited by whitespace
+                        Tokens = LineBuffer.Split(null);
+                        PeakRunner.Next = new MSMSPeak();
+                        /*
+                          This new linked list is temporary storage
+                          while we're on this scan; we'll dump the
+                          mass list to an array in a moment.
+                        */
+                        PeakRunner = PeakRunner.Next;
+                        PeakRunner.Mass = double.Parse(Tokens[0], CultureInfo.InvariantCulture);
+                        PeakRunner.Intensity = float.Parse(Tokens[1], CultureInfo.InvariantCulture);
+			//ProSightPD does not write fragment mass charges.
+                        //PeakRunner.OrigZ = int.Parse(Tokens[2]);
+		    }
+                    else if (LineBuffer == "END IONS")
+                    {
+			if ((RawRunner != null) && (ScanRunner != null))
+			{
+			    if (ScanRunner.PeakMZs == null) {
+				// Copy the linked list masses to an array and sort it.
+				var PeakCount = 0;
+				PeakRunner = PeakList.Next;
+				while (PeakRunner != null)
+				{
+				    PeakCount++;
+				    PeakRunner = PeakRunner.Next;
+				}
+				ScanRunner.PeakMZs = new double[PeakCount];
+				var Offset = 0;
+				PeakRunner = PeakList.Next;
+				while (PeakRunner != null)
+				{
+				    ScanRunner.PeakMZs[Offset] = PeakRunner.Mass;
+				    Offset++;
+				    PeakRunner = PeakRunner.Next;
+				}
+				Array.Sort(ScanRunner.PeakMZs);
+				ScanRunner.msAlignPeakCount=PeakCount;
+			    }
+			}
+                    }
+		    LineBuffer = MGFFile.ReadLine();
+		}
+	    }
+	}
 
+	public void UpdateAllmsAlignStats()
+	{
+	    //Now that we're done reading the MGFs, let's record our summary statistics.
+	    //TODO:  This will run repeatedly if we have multiple MGFs to explain the set of RAWs!
+	    var RawRunner = this.Next;
+	    while (RawRunner != null)
+	    {
+		var ScanRunner = RawRunner.ScansTable.Next;
+		while (ScanRunner != null)
+		{
+		    //Update msAlignMSnCount
+		    RawRunner.msAlignMSnCount++;
+		    //Update msAlignMSnCount0
+		    if (ScanRunner.msAlignPeakCount == 0) RawRunner.msAlignMSnCount0++;
+		    //Update msAlignPrecursorZDistn
+		    try
+		    {
+			RawRunner.msAlignPrecursorZDistn[ScanRunner.msAlignPrecursorZ]++;
+		    }
+		    catch (IndexOutOfRangeException)
+		    {
+			Console.Error.WriteLine("Reported precursor charge of {0} is greater than ceiling of {1}.", ScanRunner.msAlignPrecursorZ, MaxZ);
+		    }
+		    //Update msAlignPeakCountDistn
+		    if (ScanRunner.msAlignPeakCount > MaxPkCount)
+		    {
+			RawRunner.msAlignPeakCountDistn[MaxPkCount]++;
+		    }
+		    else
+		    {
+			RawRunner.msAlignPeakCountDistn[ScanRunner.msAlignPeakCount]++;
+		    }
+		    ScanRunner = ScanRunner.Next;
+		}
+		RawRunner = RawRunner.Next;
+	    }	    
+	}
+	
         public void ReadFromMSAlign(string PathAndFileName)
         {
             /*
@@ -687,12 +872,17 @@ namespace TDAuditor
                         switch (Tokens[0])
                         {
                             case "SCANS":
-                                NumberFromString = int.Parse(Tokens[1]);
-                                ScanRunner = this.GoToScan(NumberFromString);
-                                if (ScanRunner == null)
-                                {
-                                    Console.Error.WriteLine("Error seeking scan {0} from {1}", NumberFromString, PathAndFileName);
-                                }
+				try {
+				    NumberFromString = int.Parse(Tokens[1]);
+				    ScanRunner = this.GoToScan(NumberFromString);
+				    if (ScanRunner == null)
+				    {
+					Console.Error.WriteLine("Error seeking scan {0} from {1}", NumberFromString, PathAndFileName);
+				    }
+				}
+				catch (FormatException) {
+				    Console.Error.WriteLine("This SCANS number could not be parsed: {0}", LineBuffer);
+				}
                                 PeakList = new MSMSPeak();
                                 PeakRunner = PeakList;
                                 this.msAlignMSnCount++;
