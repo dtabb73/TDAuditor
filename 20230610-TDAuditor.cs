@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Xml;
 using System.Globalization;
+using System.Threading;
 
 namespace TDAuditor
 {
@@ -13,7 +14,7 @@ namespace TDAuditor
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20231114");
+            Console.WriteLine("beta version 20231201");
 	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
 	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
 	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -377,8 +378,10 @@ namespace TDAuditor
         public int[] mzMLPeakCountQuartiles;
         public int[] msAlignPeakCountDistn = new int[MaxPkCount + 1];
         public int[] msAlignPeakCountQuartiles;
+	public int   AALinkCountAbove2 = 0;
         public int[] AALinkCountDistn = new int[MaxPkCount + 1];
         public int[] AALinkCountQuartiles;
+	public int   LongestTagAbove2 = 0;
         public int[] LongestTagDistn = new int[MaxLength + 1];
         public int[] LongestTagQuartiles;
         // Per-scan metrics
@@ -1193,6 +1196,8 @@ namespace TDAuditor
                             LCMSMSRunner.AALinkCountDistn[MaxPkCount]++;
                         else
                             LCMSMSRunner.AALinkCountDistn[SMRunner.AALinkCount]++;
+			if (SMRunner.AALinkCount > 2)
+			    LCMSMSRunner.AALinkCountAbove2++;
 			if (WriteDeNovoTags)
 			{
 			    StreamWriter DOTFile = new StreamWriter(LCMSMSRunner.SourceFile + "-" + SMRunner.ScanNumber + "-DeNovo.txt");
@@ -1245,6 +1250,7 @@ namespace TDAuditor
                             LongestTagSoFar = LCMSMSExperiment.MaxLength;
                         }
                         LCMSMSRunner.LongestTagDistn[LongestTagSoFar]++;
+			if (LongestTagSoFar > 2) LCMSMSRunner.LongestTagAbove2 ++;
                     }
                     SMRunner = SMRunner.Next;
                 }
@@ -1311,6 +1317,7 @@ namespace TDAuditor
               "byMSn" report contains a row for each MS/MS in each
               mzML in this directory.
              */
+	    //TODO: Should I be reporting distribution of deconvolved precursor mass by RAW?
             var LCMSMSRunner = this.Next;
             const string delim = "\t";
             using (var TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
@@ -1324,7 +1331,7 @@ namespace TDAuditor
                            "\tmzMLPeakCountMin\tmzMLPeakCountQ1\tmzMLPeakCountQ2\tmzMLPeakCountQ3\tmzMLPeakCountMax" +
                            "\tmsAlignPeakCountMin\tmsAlignPeakCountQ1\tmsAlignPeakCountQ2\tmsAlignPeakCountQ3\tmsAlignPeakCountMax" +
                            "\tAALinkCountMin\tAALinkCountQ1\tAALinkCountQ2\tAALinkCountQ3\tAALinkCountMax" +
-                           "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tblank");
+                           "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tAALinkCountAbove2\tLongestTagAbove2");
                 while (LCMSMSRunner != null)
                 {
                     //We need to distinguish between MS/MS that yield deconvolved mass lists and those that don't.
@@ -1364,14 +1371,15 @@ namespace TDAuditor
                         TSVbyRun.Write(ThisQuartile + delim);
                     foreach (var ThisQuartile in LCMSMSRunner.LongestTagQuartiles)
                         TSVbyRun.Write(ThisQuartile + delim);
-                    TSVbyRun.WriteLine();
+                    TSVbyRun.Write(LCMSMSRunner.AALinkCountAbove2 + delim);
+                    TSVbyRun.WriteLine(LCMSMSRunner.LongestTagAbove2);
                     LCMSMSRunner = LCMSMSRunner.Next;
                 }
             }
             LCMSMSRunner = this.Next;
             using (var TSVbyScan = new StreamWriter("TDAuditor-byMSn.tsv"))
             {
-                TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tmzMLPrecursorZ\tmsAlignPrecursorZ\tmsAlignPrecursorMass\tmzMLPeakCount\tmsAlignPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
+                TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tmzMLPreZ\tmsAlignPreZ\tmsAlignPreMass\tmzMLPeakCount\tmsAlignPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
                 while (LCMSMSRunner != null)
                 {
                     var SMRunner = LCMSMSRunner.ScansTable.Next;
