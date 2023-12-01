@@ -1359,13 +1359,13 @@ namespace TDAuditor
             using (var TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
             {
                 TSVbyRun.WriteLine("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration" +
-                           "\tMS1Count\tmzMLMSnCount\tmsAlignMSnWithPeaksCount\tmsAlignMSnWithoutPeaksCount\tmsAlignMSnWithPeaksFraction" +
+                           "\tMS1Count\tmzMLMSnCount\tDeconvMSnWithPeaksCount\tDeconvMSnWithoutPeaksCount\tDeconvMSnWithPeaksFraction" +
                            "\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount" +
                            "\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount" +
                            "\tmzMLPreZMin\tmzMLPreZQ1\tmzMLPreZQ2\tmzMLPreZQ3\tmzMLPreZMax" +
-                           "\tmsAlignPreZMin\tmsAlignPreZQ1\tmsAlignPreZQ2\tmsAlignPreZQ3\tmsAlignPreZMax" +
+                           "\tDeconvPreZMin\tDeconvPreZQ1\tDeconvPreZQ2\tDeconvPreZQ3\tDeconvPreZMax" +
                            "\tmzMLPeakCountMin\tmzMLPeakCountQ1\tmzMLPeakCountQ2\tmzMLPeakCountQ3\tmzMLPeakCountMax" +
-                           "\tmsAlignPeakCountMin\tmsAlignPeakCountQ1\tmsAlignPeakCountQ2\tmsAlignPeakCountQ3\tmsAlignPeakCountMax" +
+                           "\tDeconvPeakCountMin\tDeconvPeakCountQ1\tDeconvPeakCountQ2\tDeconvPeakCountQ3\tDeconvPeakCountMax" +
                            "\tAALinkCountMin\tAALinkCountQ1\tAALinkCountQ2\tAALinkCountQ3\tAALinkCountMax" +
                            "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tAALinkCountAbove2\tLongestTagAbove2");
                 while (LCMSMSRunner != null)
@@ -1415,7 +1415,7 @@ namespace TDAuditor
             LCMSMSRunner = this.Next;
             using (var TSVbyScan = new StreamWriter("TDAuditor-byMSn.tsv"))
             {
-                TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tmzMLPreZ\tmsAlignPreZ\tmsAlignPreMass\tmzMLPeakCount\tmsAlignPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
+                TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tmzMLPreZ\tDeconvPreZ\tDeconvPreMass\tmzMLPeakCount\tDeconvPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
                 while (LCMSMSRunner != null)
                 {
                     var SMRunner = LCMSMSRunner.ScansTable.Next;
