@@ -200,6 +200,7 @@ namespace TDAuditor
         public ScanMetrics Next;
         public int ScanNumber;
         public SimilarityLink SimilarScans = new SimilarityLink();
+        public SimilarityLink SimilarScansBeforeThis = new SimilarityLink();
         public static double FragmentTolerance = 0.02;
         private const double LowMZ = 400;
         private const double HighMZ = 2000;
@@ -311,6 +312,37 @@ namespace TDAuditor
             return 0;
         }
 
+	public void GenerateForwardSimilarityLinks(object obj)
+	{
+	    var OtherScan = this.Next;
+	    var SimilarityRunner = this.SimilarScans;
+	    while (OtherScan != null)
+	    {
+		if (OtherScan.msAlignPeakCount > 0)
+		{
+		    // Test these two scans to determine if they have an improbable amount of deconvolved mass overlap.
+		    var ThisMatchScore = this.TestForSimilarity(OtherScan);
+		    /*
+		      100 is a very arbitrary threshold...
+		      ThisMatchScore is a log probability that the
+		      spectra would share this many overlapping peaks
+		      by random chance.
+		    */
+		    if (ThisMatchScore > 100)
+		    {
+			//Make a link between these MS/MS scans to reflect their high mass list overlap.
+			var SimBuffer = SimilarityRunner.Next;
+			SimilarityRunner.Next = new SimilarityLink();
+			SimilarityRunner = SimilarityRunner.Next;
+			SimilarityRunner.Other = OtherScan;
+			SimilarityRunner.Score = ThisMatchScore;
+			SimilarityRunner.Next = SimBuffer;
+		    }
+		}
+		OtherScan = OtherScan.Next;
+	    }
+	}
+
         public int ComponentRecurse(int ComponentLabel)
         {
             if (Visited)
@@ -322,6 +354,12 @@ namespace TDAuditor
             ComponentNumber = ComponentLabel;
             var SizeContribution = 1;
             var SLRunner = SimilarScans.Next;
+            while (SLRunner != null)
+            {
+                SizeContribution += SLRunner.Other.ComponentRecurse(ComponentLabel);
+                SLRunner = SLRunner.Next;
+            }
+	    SLRunner = SimilarScansBeforeThis.Next;
             while (SLRunner != null)
             {
                 SizeContribution += SLRunner.Other.ComponentRecurse(ComponentLabel);
@@ -970,46 +1008,44 @@ namespace TDAuditor
                 {
                     if (SMRunner.msAlignPeakCount > 0)
                     {
-                        var OtherScan = SMRunner.Next;
-                        var SimilarityRunner = SMRunner.SimilarScans;
                         // NonVacantScanCount should, in the end, be the same as msAlignMSnCount - msAlignMSnCount0
                         NonVacantScanCount++;
-                        while (OtherScan != null)
-                        {
-                            if (OtherScan.msAlignPeakCount > 0)
-                            {
-                                // Test these two scans to determine if they have an improbable amount of deconvolved mass overlap.
-                                var ThisMatchScore = SMRunner.TestForSimilarity(OtherScan);
-                                /*
-                                  100 is a very arbitrary threshold...
-                                  ThisMatchScore is a log probability
-                                  that the spectra would share this
-                                  many overlapping peaks _or more_ by
-                                  random chance.
-                                */
-                                if (ThisMatchScore > 100)
-                                {
-                                    //Make a link between these MS/MS scans to reflect their high mass list overlap.
-                                    var SimBuffer = SimilarityRunner.Next;
-                                    SimilarityRunner.Next = new SimilarityLink();
-                                    SimilarityRunner = SimilarityRunner.Next;
-                                    SimilarityRunner.Other = OtherScan;
-                                    SimilarityRunner.Score = ThisMatchScore;
-                                    SimilarityRunner.Next = SimBuffer;
-                                    //Make the reverse link; this is necessary for component detector.
-                                    SimBuffer = OtherScan.SimilarScans.Next;
-                                    OtherScan.SimilarScans.Next = new SimilarityLink();
-                                    OtherScan.SimilarScans.Next.Other = SMRunner;
-                                    OtherScan.SimilarScans.Next.Score = ThisMatchScore;
-                                    OtherScan.SimilarScans.Next.Next = SimBuffer;
-                                    LinkCount++;
-                                }
-                            }
-                            OtherScan = OtherScan.Next;
-                        }
-                    }
+			//SMRunner.GenerateForwardSimilarityLinks();
+			ThreadPool.QueueUserWorkItem(new WaitCallback(SMRunner.GenerateForwardSimilarityLinks));
+		    }
                     SMRunner = SMRunner.Next;
                 }
+		// Here we need to wait until all those queued threads are complete
+		var StillRunning = true;
+		var junk = 0;
+		var maxWorkerThreads = 0;
+		var WorkerThreads = 0;
+		ThreadPool.GetMaxThreads(out maxWorkerThreads, out junk);
+		while (StillRunning)
+		{
+		    ThreadPool.GetAvailableThreads(out WorkerThreads, out junk);
+		    //Console.WriteLine("Workers: {0}, Max: {1}",WorkerThreads, maxWorkerThreads);
+		    if (WorkerThreads == maxWorkerThreads) StillRunning=false;
+		    Thread.Sleep(100);
+		}
+		// Having made our forward links in parallel, we now create the reverse links so we can find connected components.
+		SMRunner = LCMSMSRunner.ScansTable.Next;
+		while (SMRunner != null)
+		{
+		    var SimilarityRunner = SMRunner.SimilarScans.Next;
+		    while (SimilarityRunner != null)
+		    {
+			var OtherScan = SimilarityRunner.Other;
+			var OtherSimBuffer = OtherScan.SimilarScansBeforeThis.Next;
+			OtherScan.SimilarScansBeforeThis.Next = new SimilarityLink();
+			OtherScan.SimilarScansBeforeThis.Next.Next = OtherSimBuffer;
+			OtherScan.SimilarScansBeforeThis.Next.Other = SMRunner;
+			OtherScan.SimilarScansBeforeThis.Next.Score = SimilarityRunner.Score;
+			SimilarityRunner = SimilarityRunner.Next;
+			LinkCount++;
+		    }
+		    SMRunner = SMRunner.Next;
+		}
                 if (LinkCount == 0)
                 {
                     LCMSMSRunner.Redundancy = 0;
@@ -1035,6 +1071,12 @@ namespace TDAuditor
                 {
                     var SLRunner = SMRunner.SimilarScans.Next;
                     var ThisDegree = 0;
+                    while (SLRunner != null)
+                    {
+                        ThisDegree++;
+                        SLRunner = SLRunner.Next;
+                    }
+		    SLRunner = SMRunner.SimilarScansBeforeThis.Next;
                     while (SLRunner != null)
                     {
                         ThisDegree++;
@@ -1112,13 +1154,7 @@ namespace TDAuditor
                         SLRunner = SMRunner.SimilarScans.Next;
                         while (SLRunner != null)
                         {
-                            /*
-                              Because similarity links are stored in
-                              both directions, we need to ensure we
-                              write only half of the links.
-                             */
-                            if (SLRunner.Other.ScanNumber > SMRunner.ScanNumber)
-                                DOTFile.WriteLine(SMRunner.ScanNumber + "--" + SLRunner.Other.ScanNumber);
+			    DOTFile.WriteLine(SMRunner.ScanNumber + "--" + SLRunner.Other.ScanNumber);
                             SLRunner = SLRunner.Next;
                         }
                     }
