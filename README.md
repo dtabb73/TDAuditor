@@ -32,13 +32,17 @@ Next come dissociation statistics:
 * count of mzML MSns from EThcD
 * count of mzML MSns from ETciD
 
-The remaining metrics describe distributions by suppying minimum, 1st quartile, median, 3rd quartile, and maximum:
+These metrics describe distributions by suppying minimum, 1st quartile, median, 3rd quartile, and maximum:
 * distribution of precursor charges from mzML file
 * distribution of precursor charges from msAlign file
 * distribution of MSn peak counts from mzML file
 * distribution of MSn peak counts from msAlign file
 * distribution of possible amino acid gap counts among MSn scans in msAlign file
 * distribution of longest possible sequence tag lengths among MSn scans in msAlign file
+
+Two metrics attempt to summarize de novo "successes" across the LC-MS/MS experiment
+* AALinkCountAbove2 asks how many MSn scans bracketed at least three amino acid masses.
+* LongestTagAbove2 asks how many MSn scans bracketed at least three consecutive amino acid masses.
 
 # TDAuditor-byMSn.tsv for each MSn
 The file reports a relatively small set of metrics for each MSn scan in all input files:
