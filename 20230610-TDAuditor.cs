@@ -1396,7 +1396,7 @@ namespace TDAuditor
             using (var TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
             {
                 TSVbyRun.WriteLine("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration" +
-				   "\tMS1Count\tmzMLMSnCount\tDeconvMSnWithPeaksCount\tDeconvMSnWithoutPeaksCount\tDeconvMSnWithPeaksFraction" +
+				   "\tmzMLMS1Count\tmzMLMSnCount\tDeconvMSnWithPeaksCount\tDeconvMSnWithoutPeaksCount\tDeconvMSnWithPeaksFraction" +
 				   "\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount" +
 				   "\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount" +
 				   "\tmzMLPreZMin\tmzMLPreZQ1\tmzMLPreZQ2\tmzMLPreZQ3\tmzMLPreZMax" +
