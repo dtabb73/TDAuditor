@@ -1405,7 +1405,7 @@ namespace TDAuditor
 				   "\tmzMLPeakCountMin\tmzMLPeakCountQ1\tmzMLPeakCountQ2\tmzMLPeakCountQ3\tmzMLPeakCountMax" +
 				   "\tDeconvPeakCountMin\tDeconvPeakCountQ1\tDeconvPeakCountQ2\tDeconvPeakCountQ3\tDeconvPeakCountMax" +
 				   "\tAALinkCountMin\tAALinkCountQ1\tAALinkCountQ2\tAALinkCountQ3\tAALinkCountMax" +
-				   "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tAALinkCountAbove2\tLongestTagAbove2");
+				   "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tAALinkCountAbove2\tTagLengthAbove2");
                 while (LCMSMSRunner != null)
                 {
                     //We need to distinguish between MS/MS that yield deconvolved mass lists and those that don't.
