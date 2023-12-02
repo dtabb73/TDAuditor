@@ -14,7 +14,7 @@ namespace TDAuditor
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20231201");
+            Console.WriteLine("beta version 20231202");
 	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
 	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
 	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -412,6 +412,7 @@ namespace TDAuditor
         public int[] mzMLPrecursorZQuartiles;
         public int[] msAlignPrecursorZDistn = new int[MaxZ + 1];
         public int[] msAlignPrecursorZQuartiles;
+	public double[] msAlignPrecursorMassQuartiles = new double[5];
         public int[] mzMLPeakCountDistn = new int[MaxPkCount + 1];
         public int[] mzMLPeakCountQuartiles;
         public int[] msAlignPeakCountDistn = new int[MaxPkCount + 1];
@@ -1341,6 +1342,42 @@ namespace TDAuditor
                 LCMSMSRunner.msAlignPeakCountQuartiles = QuartilesOf(LCMSMSRunner.msAlignPeakCountDistn);
                 LCMSMSRunner.AALinkCountQuartiles = QuartilesOf(LCMSMSRunner.AALinkCountDistn);
                 LCMSMSRunner.LongestTagQuartiles = QuartilesOf(LCMSMSRunner.LongestTagDistn);
+		// We need to build a sorted array from the precursor masses to get its quartiles.
+		var ScanCount = 0;
+		var ArrayIndex = 0;
+		var SMRunner = LCMSMSRunner.ScansTable.Next;
+		while (SMRunner != null) {
+		    if (SMRunner.msAlignPrecursorMass > 0) ScanCount++;
+		    SMRunner = SMRunner.Next;
+		}
+		if (ScanCount == 0)
+		{
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[0]=Double.NaN;
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[1]=Double.NaN;
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[2]=Double.NaN;
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[3]=Double.NaN;
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[4]=Double.NaN;
+		}
+		else
+		{
+		    var msAlignPrecursorMasses = new double[ScanCount];
+		    SMRunner = LCMSMSRunner.ScansTable.Next;
+		    while (SMRunner != null) {
+			if (SMRunner.msAlignPrecursorMass > 0)
+			{
+			    msAlignPrecursorMasses[ArrayIndex] = SMRunner.msAlignPrecursorMass;
+			    ArrayIndex++;
+			}
+			SMRunner = SMRunner.Next;
+		    }
+		    Array.Sort(msAlignPrecursorMasses);
+		    // Now we can extract the min, the max, and the inner quartiles
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[0] = msAlignPrecursorMasses[0];
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[1] = msAlignPrecursorMasses[ScanCount/4];
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[2] = msAlignPrecursorMasses[ScanCount/2];
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[3] = msAlignPrecursorMasses[ScanCount/4 + ScanCount/2];
+		    LCMSMSRunner.msAlignPrecursorMassQuartiles[4] = msAlignPrecursorMasses[ScanCount-1];
+		}
                 LCMSMSRunner = LCMSMSRunner.Next;
             }
         }
@@ -1359,15 +1396,16 @@ namespace TDAuditor
             using (var TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
             {
                 TSVbyRun.WriteLine("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration" +
-                           "\tMS1Count\tmzMLMSnCount\tDeconvMSnWithPeaksCount\tDeconvMSnWithoutPeaksCount\tDeconvMSnWithPeaksFraction" +
-                           "\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount" +
-                           "\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount" +
-                           "\tmzMLPreZMin\tmzMLPreZQ1\tmzMLPreZQ2\tmzMLPreZQ3\tmzMLPreZMax" +
-                           "\tDeconvPreZMin\tDeconvPreZQ1\tDeconvPreZQ2\tDeconvPreZQ3\tDeconvPreZMax" +
-                           "\tmzMLPeakCountMin\tmzMLPeakCountQ1\tmzMLPeakCountQ2\tmzMLPeakCountQ3\tmzMLPeakCountMax" +
-                           "\tDeconvPeakCountMin\tDeconvPeakCountQ1\tDeconvPeakCountQ2\tDeconvPeakCountQ3\tDeconvPeakCountMax" +
-                           "\tAALinkCountMin\tAALinkCountQ1\tAALinkCountQ2\tAALinkCountQ3\tAALinkCountMax" +
-                           "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tAALinkCountAbove2\tLongestTagAbove2");
+				   "\tMS1Count\tmzMLMSnCount\tDeconvMSnWithPeaksCount\tDeconvMSnWithoutPeaksCount\tDeconvMSnWithPeaksFraction" +
+				   "\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount" +
+				   "\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount" +
+				   "\tmzMLPreZMin\tmzMLPreZQ1\tmzMLPreZQ2\tmzMLPreZQ3\tmzMLPreZMax" +
+				   "\tDeconvPreZMin\tDeconvPreZQ1\tDeconvPreZQ2\tDeconvPreZQ3\tDeconvPreZMax" +
+				   "\tDeconvPreMassMin\tDeconvPreMassQ1\tDeconvPreMassQ2\tDeconvPreMassQ3\tDeconvPreMassMax" +
+				   "\tmzMLPeakCountMin\tmzMLPeakCountQ1\tmzMLPeakCountQ2\tmzMLPeakCountQ3\tmzMLPeakCountMax" +
+				   "\tDeconvPeakCountMin\tDeconvPeakCountQ1\tDeconvPeakCountQ2\tDeconvPeakCountQ3\tDeconvPeakCountMax" +
+				   "\tAALinkCountMin\tAALinkCountQ1\tAALinkCountQ2\tAALinkCountQ3\tAALinkCountMax" +
+				   "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tAALinkCountAbove2\tLongestTagAbove2");
                 while (LCMSMSRunner != null)
                 {
                     //We need to distinguish between MS/MS that yield deconvolved mass lists and those that don't.
@@ -1399,6 +1437,8 @@ namespace TDAuditor
                         TSVbyRun.Write(ThisQuartile + delim);
                     foreach (var ThisQuartile in LCMSMSRunner.msAlignPrecursorZQuartiles)
                         TSVbyRun.Write(ThisQuartile + delim);
+		    foreach (var ThisQuartile in LCMSMSRunner.msAlignPrecursorMassQuartiles)
+			TSVbyRun.Write(ThisQuartile + delim);
                     foreach (var ThisQuartile in LCMSMSRunner.mzMLPeakCountQuartiles)
                         TSVbyRun.Write(ThisQuartile + delim);
                     foreach (var ThisQuartile in LCMSMSRunner.msAlignPeakCountQuartiles)
