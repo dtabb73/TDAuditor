@@ -43,7 +43,7 @@ These metrics describe distributions by suppying minimum, 1st quartile, median, 
 
 Two metrics attempt to summarize de novo "successes" across the LC-MS/MS experiment
 * AALinkCountAbove2: asks how many MSn scans bracketed at least three amino acid masses.
-* LongestTagAbove2: asks how many MSn scans bracketed at least three consecutive amino acid masses.
+* TagLengthAbove2: asks how many MSn scans bracketed at least three consecutive amino acid masses.
 
 # TDAuditor-byMSn.tsv for each MSn
 The file reports a relatively small set of metrics for each MSn scan in all input files:
