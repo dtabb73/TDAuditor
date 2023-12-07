@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Xml;
+using System.Diagnostics;
 using System.Globalization;
 using System.Threading;
 
@@ -14,7 +15,7 @@ namespace TDAuditor
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20231202");
+            Console.WriteLine("beta version 20231207");
 	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
 	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
 	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -56,7 +57,9 @@ namespace TDAuditor
             var Raws = new LCMSMSExperiment();
             var RawsRunner = Raws;
             string Basename;
-
+	    Stopwatch Timer = new Stopwatch();
+	    TimeSpan Duration;
+	    Timer.Start();
             Console.WriteLine("\nImporting from mzML files...");
             foreach (var current in mzMLs)
             {
@@ -70,6 +73,11 @@ namespace TDAuditor
                 RawsRunner.ReadFromMZML(XMLfile);
                 RawsRunner.ParseScanNumbers();
             }
+	    Timer.Stop();
+	    Duration = Timer.Elapsed;
+	    Console.WriteLine("\tTime for mzML reading: {0}",Duration.ToString());
+	    Timer.Reset();
+	    Timer.Start();
 	    if (ReadMGFnotMSAlign == true)
 	    {
 		Console.WriteLine("\nImporting from ProSight PD MGF...");
@@ -105,13 +113,31 @@ namespace TDAuditor
 		  lack corresponding msAlign files.
 		*/
 	    }
+	    Timer.Stop();
+	    Duration = Timer.Elapsed;
+	    Console.WriteLine("\tTime for deconvolution reading: {0}",Duration.ToString());
+	    Timer.Reset();
+	    Timer.Start();
             Console.WriteLine("\nSeeking MS/MS scan pairs with many shared masses...");
             Raws.FindSimilarSpectraWithinRaw(WriteConnectedComponents);
+	    Timer.Stop();
+	    Duration = Timer.Elapsed;
+	    Console.WriteLine("\tTime for similarity detection: {0}",Duration.ToString());
+	    Timer.Reset();
+	    Timer.Start();
             Console.WriteLine("\nGenerating sequence tags...");
             Raws.GenerateSequenceTags(WriteDeNovoTags);
+	    Timer.Stop();
+	    Duration = Timer.Elapsed;
+	    Console.WriteLine("\tTime for de novo inference: {0}",Duration.ToString());
+	    Timer.Reset();
+	    Timer.Start();
             Raws.ComputeDistributions();
             Console.WriteLine("\nWriting TDAuditor-byRun and TDAuditor-byMSn TSV reports...");
             Raws.WriteTextQCReport();
+	    Timer.Stop();
+	    Duration = Timer.Elapsed;
+	    Console.WriteLine("\tTime for computing quartiles and reporting: {0}",Duration.ToString());
         }
 
         static string SniffMSAlignForSource(string PathAndFile)
@@ -196,7 +222,7 @@ namespace TDAuditor
         public int ComponentNumber;
         public bool Visited;
         public int AALinkCount;
-        public float LongestTag;
+        public int LongestTag;
         public ScanMetrics Next;
         public int ScanNumber;
         public SimilarityLink SimilarScans = new SimilarityLink();
@@ -367,6 +393,138 @@ namespace TDAuditor
             }
             return SizeContribution;
         }
+
+	public void SequenceTagThisSpectrum(object obj)
+	{
+	    /*
+	      First, convert the array of mass values into a linked list again.
+	    */
+	    var LongestTagSoFar = 0;
+	    var PeakList = new MSMSPeak();
+	    var PRunner1 = PeakList;
+	    foreach (var ThisPeak in this.PeakMZs)
+	    {
+		PRunner1.Next = new MSMSPeak();
+		PRunner1 = PRunner1.Next;
+		PRunner1.Mass = ThisPeak;
+	    }
+	    /*
+	      Find the gaps corresponding to amino acid masses.
+	    */
+	    PRunner1 = PeakList.Next;
+	    MassGap MGBuffer;
+	    while (PRunner1 != null)
+	    {
+		var PRunner2 = PRunner1.Next;
+		while (PRunner2 != null)
+		{
+		    var MassDiff = PRunner2.Mass - PRunner1.Mass;
+		    var index = 0;
+		    foreach (var ThisAA in ScanMetrics.AminoAcids)
+		    {
+			var MassError = Math.Abs(MassDiff - ThisAA);
+			if (MassError < ScanMetrics.FragmentTolerance)
+			{
+			    // ThisAA corresponds in mass to the separation between these two peaks
+			    this.AALinkCount++;
+			    MGBuffer = PRunner1.AALinks;
+			    PRunner1.AALinks = new MassGap();
+			    PRunner1.AALinks.Next = MGBuffer;
+			    PRunner1.AALinks.NextPeak = PRunner2;
+			    PRunner1.AALinks.ExpectedMass = ThisAA;
+			    PRunner1.AALinks.AANumber = index;
+			}
+			index++;
+		    }
+		    PRunner2 = PRunner2.Next;
+		}
+		PRunner1 = PRunner1.Next;
+	    }
+	    /*
+	      Use recursion to seek the longest sequence
+	      for which each consecutive fragment exists.
+	    */
+	    PRunner1 = PeakList.Next;
+	    while (PRunner1 != null)
+	    {
+		if (PRunner1.LongestTagStartingHere == 0)
+		{
+		    MGBuffer = PRunner1.AALinks;
+		    while (MGBuffer != null)
+		    {
+			var ThisTagLength = MGBuffer.DepthTagSearch();
+			if (ThisTagLength > LongestTagSoFar)
+			{
+			    LongestTagSoFar = ThisTagLength;
+			}
+			MGBuffer = MGBuffer.Next;
+		    }
+		}
+		PRunner1 = PRunner1.Next;
+	    }
+	    this.LongestTag = LongestTagSoFar;
+	}
+
+	public void WriteDeNovoGraph(string Filename)
+	{
+	    /* It's a kludge to copy so much code from the above
+	     * function for this, but I don't want multiple threads
+	     * all trying to write their graphs to disk at once. */
+	    var PeakList = new MSMSPeak();
+	    var PRunner1 = PeakList;
+	    foreach (var ThisPeak in this.PeakMZs)
+	    {
+		PRunner1.Next = new MSMSPeak();
+		PRunner1 = PRunner1.Next;
+		PRunner1.Mass = ThisPeak;
+	    }
+	    /*
+	      Find the gaps corresponding to amino acid masses.
+	    */
+	    PRunner1 = PeakList.Next;
+	    MassGap MGBuffer;
+	    while (PRunner1 != null)
+	    {
+		var PRunner2 = PRunner1.Next;
+		while (PRunner2 != null)
+		{
+		    var MassDiff = PRunner2.Mass - PRunner1.Mass;
+		    var index = 0;
+		    foreach (var ThisAA in ScanMetrics.AminoAcids)
+		    {
+			var MassError = Math.Abs(MassDiff - ThisAA);
+			if (MassError < ScanMetrics.FragmentTolerance)
+			{
+			    // ThisAA corresponds in mass to the separation between these two peaks
+			    MGBuffer = PRunner1.AALinks;
+			    PRunner1.AALinks = new MassGap();
+			    PRunner1.AALinks.Next = MGBuffer;
+			    PRunner1.AALinks.NextPeak = PRunner2;
+			    PRunner1.AALinks.ExpectedMass = ThisAA;
+			    PRunner1.AALinks.AANumber = index;
+			}
+			index++;
+		    }
+		    PRunner2 = PRunner2.Next;
+		}
+		PRunner1 = PRunner1.Next;
+	    }
+	    StreamWriter DOTFile = new StreamWriter(Filename);
+	    DOTFile.WriteLine("graph DeNovo {");
+	    PRunner1 = PeakList.Next;
+	    while (PRunner1 != null)
+	    {
+		MGBuffer = PRunner1.AALinks;
+		while (MGBuffer != null)
+		{
+		    DOTFile.WriteLine(Math.Round(PRunner1.Mass,3) + "--" + Math.Round(MGBuffer.NextPeak.Mass,3) + " [label=\"" + ScanMetrics.AminoAcidSymbols[MGBuffer.AANumber] +"\"]");
+		    MGBuffer = MGBuffer.Next;
+		}
+		PRunner1 = PRunner1.Next;
+	    }
+	    DOTFile.WriteLine("}");
+	    DOTFile.Flush();
+	}
     }
 
     class LCMSMSExperiment
@@ -1189,114 +1347,55 @@ namespace TDAuditor
                 var SMRunner = LCMSMSRunner.ScansTable.Next;
                 while (SMRunner != null)
                 {
-                    /*
-                      First, convert the array of mass values into a linked list again.
-                     */
                     if (SMRunner.msAlignPeakCount > 1)
                     {
-                        var LongestTagSoFar = 0;
-                        var PeakList = new MSMSPeak();
-                        var PRunner1 = PeakList;
-                        foreach (var ThisPeak in SMRunner.PeakMZs)
-                        {
-                            PRunner1.Next = new MSMSPeak();
-                            PRunner1 = PRunner1.Next;
-                            PRunner1.Mass = ThisPeak;
-                        }
-                        /*
-                          Find the gaps corresponding to amino acid masses.
-                        */
-                        PRunner1 = PeakList.Next;
-                        MassGap MGBuffer;
-                        while (PRunner1 != null)
-                        {
-                            var PRunner2 = PRunner1.Next;
-                            while (PRunner2 != null)
-                            {
-                                var MassDiff = PRunner2.Mass - PRunner1.Mass;
-                                var index = 0;
-                                foreach (var ThisAA in ScanMetrics.AminoAcids)
-                                {
-                                    var MassError = Math.Abs(MassDiff - ThisAA);
-                                    if (MassError < ScanMetrics.FragmentTolerance)
-                                    {
-                                        // ThisAA corresponds in mass to the separation between these two peaks
-                                        SMRunner.AALinkCount++;
-                                        MGBuffer = PRunner1.AALinks;
-                                        PRunner1.AALinks = new MassGap();
-                                        PRunner1.AALinks.Next = MGBuffer;
-                                        PRunner1.AALinks.NextPeak = PRunner2;
-                                        PRunner1.AALinks.ExpectedMass = ThisAA;
-					PRunner1.AALinks.AANumber = index;
-                                    }
-                                    index++;
-                                }
-                                PRunner2 = PRunner2.Next;
-                            }
-                            PRunner1 = PRunner1.Next;
-                        }
-                        if (SMRunner.AALinkCount > LCMSMSExperiment.MaxPkCount)
+			ThreadPool.QueueUserWorkItem(new WaitCallback(SMRunner.SequenceTagThisSpectrum));
+		    }
+		    SMRunner = SMRunner.Next;
+		}
+		// Here we need to wait until all those queued threads are complete
+		var StillRunning = true;
+		var junk = 0;
+		var maxWorkerThreads = 0;
+		var WorkerThreads = 0;
+		ThreadPool.GetMaxThreads(out maxWorkerThreads, out junk);
+		while (StillRunning)
+		{
+		    ThreadPool.GetAvailableThreads(out WorkerThreads, out junk);
+		    if (WorkerThreads == maxWorkerThreads)
+		    {
+			StillRunning=false;
+		    }
+		    else
+		    {
+			Thread.Sleep(100);
+		    }
+		}
+		// Now update the AALinkCounts and TagLengths for all spectra in this RAW.
+		SMRunner = LCMSMSRunner.ScansTable.Next;
+		while (SMRunner != null)
+		{
+		    if (SMRunner.msAlignPeakCount > 1)
+		    {
+			if (SMRunner.AALinkCount > LCMSMSExperiment.MaxPkCount)
                             LCMSMSRunner.AALinkCountDistn[MaxPkCount]++;
                         else
                             LCMSMSRunner.AALinkCountDistn[SMRunner.AALinkCount]++;
 			if (SMRunner.AALinkCount > 2)
 			    LCMSMSRunner.AALinkCountAbove2++;
+			if (SMRunner.LongestTag > LCMSMSExperiment.MaxLength)
+			    LCMSMSRunner.LongestTagDistn[MaxLength]++;
+			else
+			    LCMSMSRunner.LongestTagDistn[SMRunner.LongestTag]++;
+		        if (SMRunner.LongestTag > LongestTagForThisRAW) LongestTagForThisRAW = SMRunner.LongestTag;
+			if (SMRunner.LongestTag > 2) LCMSMSRunner.LongestTagAbove2++;
 			if (WriteDeNovoTags)
 			{
-			    StreamWriter DOTFile = new StreamWriter(LCMSMSRunner.SourceFile + "-" + SMRunner.ScanNumber + "-DeNovo.txt");
-			    DOTFile.WriteLine("graph DeNovo {");
-			    PRunner1 = PeakList.Next;
-			    while (PRunner1 != null)
-			    {
-				MGBuffer = PRunner1.AALinks;
-				while (MGBuffer != null)
-				{
-				    DOTFile.WriteLine(Math.Round(PRunner1.Mass,3) + "--" + Math.Round(MGBuffer.NextPeak.Mass,3) + " [label=\"" + ScanMetrics.AminoAcidSymbols[MGBuffer.AANumber] +"\"]");
-				    MGBuffer = MGBuffer.Next;
-				}
-				PRunner1 = PRunner1.Next;
-			    }
-			    DOTFile.WriteLine("}");
-			    DOTFile.Flush();
+			    SMRunner.WriteDeNovoGraph(LCMSMSRunner.SourceFile + "-" + SMRunner.ScanNumber + "-DeNovo.txt");
 			}
-                        /*
-                          Use recursion to seek the longest sequence
-                          for which each consecutive fragment exists.
-                        */
-                        PRunner1 = PeakList.Next;
-                        while (PRunner1 != null)
-                        {
-                            if (PRunner1.LongestTagStartingHere == 0)
-                            {
-                                MGBuffer = PRunner1.AALinks;
-                                while (MGBuffer != null)
-                                {
-                                    var ThisTagLength = MGBuffer.DepthTagSearch();
-                                    if (ThisTagLength > LongestTagSoFar)
-                                    {
-                                        LongestTagSoFar = ThisTagLength;
-                                    }
-                                    if (ThisTagLength > LongestTagForThisRAW)
-                                    {
-                                        LongestTagForThisRAW = ThisTagLength;
-                                    }
-                                    MGBuffer = MGBuffer.Next;
-                                }
-                            }
-
-                            //If LongestTagStartingHere >0, this node has already been visited from one of lower mass and thus this peak cannot start the longest path in the spectrum.
-                            PRunner1 = PRunner1.Next;
-                        }
-                        SMRunner.LongestTag = LongestTagSoFar;
-                        if (LongestTagSoFar > LCMSMSExperiment.MaxLength)
-                        {
-                            LongestTagSoFar = LCMSMSExperiment.MaxLength;
-                        }
-                        LCMSMSRunner.LongestTagDistn[LongestTagSoFar]++;
-			if (LongestTagSoFar > 2) LCMSMSRunner.LongestTagAbove2 ++;
-                    }
-                    SMRunner = SMRunner.Next;
-                }
+		    }
+		    SMRunner = SMRunner.Next;
+		}
                 Console.WriteLine("\tInferred sequence tags as long as {0} AAs in {1}", LongestTagForThisRAW, LCMSMSRunner.SourceFile);
                 LCMSMSRunner = LCMSMSRunner.Next;
             }
