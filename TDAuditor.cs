@@ -15,7 +15,7 @@ namespace TDAuditor
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20231207");
+            Console.WriteLine("beta version 20231208");
 	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
 	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
 	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -108,6 +108,7 @@ namespace TDAuditor
 			CorrespondingRaw.ReadFromMSAlign(current);
 		    }
 		}
+		Raws.UpdateAllmsAlignStats();
 		/*
 		  TODO: we should really check to see if any of the mzMLs
 		  lack corresponding msAlign files.
@@ -213,8 +214,9 @@ namespace TDAuditor
         public string mzMLDissociation = "";
         //TODO Should I record what dissociation type msAlign reports?
         public int mzMLPrecursorZ;
+	public bool MatchedToDeconvolution = false;
         public int msAlignPrecursorZ;
-        public double msAlignPrecursorMass;
+        public double msAlignPrecursorMass = Double.NaN;
         public int mzMLPeakCount;
         public int msAlignPeakCount;
         public double[] PeakMZs;
@@ -538,8 +540,9 @@ namespace TDAuditor
         // Computed fields
         public int mzMLMS1Count;
         public int mzMLMSnCount;
+	public int MatchedToDeconvolution;
         public int msAlignMSnCount;
-        // This next count includes only the MSn scans with zero peaks in their deconvolutions
+	// This next count includes only the MSn scans with zero peaks in their deconvolutions
         public int msAlignMSnCount0;
         /*
           The following metrics characterize the extent to which MSn
@@ -910,6 +913,7 @@ namespace TDAuditor
 					PeakRunner = PeakList;
 					ScanRunner = RawRunner.GoToScan(NumberFromString);
 					if (ScanRunner == null) Console.Error.WriteLine("Error!  Could not find scan {0}.",NumberFromString);
+					else ScanRunner.MatchedToDeconvolution = true;
 				    }
 				    catch (FormatException) {
 					Console.Error.WriteLine("Scan number could not be parsed from {0}", LineBuffer);
@@ -997,35 +1001,37 @@ namespace TDAuditor
 
 	public void UpdateAllmsAlignStats()
 	{
-	    //Now that we're done reading the MGFs, let's record our summary statistics.
-	    //TODO:  This will run repeatedly if we have multiple MGFs to explain the set of RAWs!
+	    //Now that we're done reading the deconvolutions, let's record our summary statistics.
 	    var RawRunner = this.Next;
 	    while (RawRunner != null)
 	    {
 		var ScanRunner = RawRunner.ScansTable.Next;
 		while (ScanRunner != null)
 		{
-		    //Update msAlignMSnCount
-		    RawRunner.msAlignMSnCount++;
-		    //Update msAlignMSnCount0
-		    if (ScanRunner.msAlignPeakCount == 0) RawRunner.msAlignMSnCount0++;
-		    //Update msAlignPrecursorZDistn
-		    try
-		    {
-			RawRunner.msAlignPrecursorZDistn[ScanRunner.msAlignPrecursorZ]++;
-		    }
-		    catch (IndexOutOfRangeException)
-		    {
-			Console.Error.WriteLine("Reported precursor charge of {0} is greater than ceiling of {1}.", ScanRunner.msAlignPrecursorZ, MaxZ);
-		    }
-		    //Update msAlignPeakCountDistn
-		    if (ScanRunner.msAlignPeakCount > MaxPkCount)
-		    {
-			RawRunner.msAlignPeakCountDistn[MaxPkCount]++;
-		    }
-		    else
-		    {
-			RawRunner.msAlignPeakCountDistn[ScanRunner.msAlignPeakCount]++;
+		    if (ScanRunner.MatchedToDeconvolution) {
+			RawRunner.MatchedToDeconvolution++;
+			//Update msAlignMSnCount
+			RawRunner.msAlignMSnCount++;
+			//Update msAlignMSnCount0
+			if (ScanRunner.msAlignPeakCount == 0) RawRunner.msAlignMSnCount0++;
+			//Update msAlignPrecursorZDistn
+			try
+			{
+			    RawRunner.msAlignPrecursorZDistn[ScanRunner.msAlignPrecursorZ]++;
+			}
+			catch (IndexOutOfRangeException)
+			{
+			    Console.Error.WriteLine("Reported precursor charge of {0} is greater than ceiling of {1}.", ScanRunner.msAlignPrecursorZ, MaxZ);
+			}
+			//Update msAlignPeakCountDistn
+			if (ScanRunner.msAlignPeakCount > MaxPkCount)
+			{
+			    RawRunner.msAlignPeakCountDistn[MaxPkCount]++;
+			}
+			else
+			{
+			    RawRunner.msAlignPeakCountDistn[ScanRunner.msAlignPeakCount]++;
+			}
 		    }
 		    ScanRunner = ScanRunner.Next;
 		}
@@ -1079,25 +1085,17 @@ namespace TDAuditor
 				    {
 					Console.Error.WriteLine("Error seeking scan {0} from {1}", NumberFromString, PathAndFileName);
 				    }
+				    else ScanRunner.MatchedToDeconvolution=true;
 				}
 				catch (FormatException) {
 				    Console.Error.WriteLine("This SCANS number could not be parsed: {0}", LineBuffer);
 				}
                                 PeakList = new MSMSPeak();
                                 PeakRunner = PeakList;
-                                this.msAlignMSnCount++;
                                 break;
                             case "PRECURSOR_CHARGE":
                                 NumberFromString = int.Parse(Tokens[1]);
                                 ScanRunner.msAlignPrecursorZ = NumberFromString;
-                                try
-                                {
-                                    this.msAlignPrecursorZDistn[NumberFromString]++;
-                                }
-                                catch (IndexOutOfRangeException)
-                                {
-                                    Console.Error.WriteLine("Maximum charge of {0} is less than msAlign charge {1}.", MaxZ, NumberFromString);
-                                }
                                 break;
                             case "PRECURSOR_MASS":
                                 ScanRunner.msAlignPrecursorMass = double.Parse(Tokens[1], CultureInfo.InvariantCulture);
@@ -1122,19 +1120,7 @@ namespace TDAuditor
                     }
                     else if (LineBuffer == "END IONS")
                     {
-                        if (ScanRunner.msAlignPeakCount > MaxPkCount)
-                        {
-                            this.msAlignPeakCountDistn[MaxPkCount]++;
-                        }
-                        else
-                        {
-                            this.msAlignPeakCountDistn[ScanRunner.msAlignPeakCount]++;
-                        }
-                        if (ScanRunner.msAlignPeakCount == 0)
-                        {
-                            this.msAlignMSnCount0++;
-                        }
-                        else
+                        if (ScanRunner.msAlignPeakCount > 0)
                         {
                             // Copy the linked list masses to an array and sort it.
                             ScanRunner.PeakMZs = new double[ScanRunner.msAlignPeakCount];
@@ -1439,6 +1425,7 @@ namespace TDAuditor
         public void ComputeDistributions()
         {
             var LCMSMSRunner = this.Next;
+	    // TODO: include only MatchedToDeconvolution scans.
             while (LCMSMSRunner != null)
             {
                 LCMSMSRunner.mzMLPrecursorZQuartiles = QuartilesOf(LCMSMSRunner.mzMLPrecursorZDistn);
@@ -1525,6 +1512,7 @@ namespace TDAuditor
                     TSVbyRun.Write(LCMSMSRunner.MaxScanStartTime + delim);
                     TSVbyRun.Write(LCMSMSRunner.mzMLMS1Count + delim);
                     TSVbyRun.Write(LCMSMSRunner.mzMLMSnCount + delim);
+		    //TSVbyRun.Write(LCMSMSRunner.MatchedToDeconvolution + delim);
                     TSVbyRun.Write(MSnCountWithPeaks + delim);
                     TSVbyRun.Write(LCMSMSRunner.msAlignMSnCount0 + delim);
                     TSVbyRun.Write(MSnWithPeaksFraction + delim);
@@ -1560,7 +1548,7 @@ namespace TDAuditor
             LCMSMSRunner = this.Next;
             using (var TSVbyScan = new StreamWriter("TDAuditor-byMSn.tsv"))
             {
-                TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tmzMLPreZ\tDeconvPreZ\tDeconvPreMass\tmzMLPeakCount\tDeconvPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
+                TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tMatchedToDeconvolution\tmzMLPreZ\tDeconvPreZ\tDeconvPreMass\tmzMLPeakCount\tDeconvPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
                 while (LCMSMSRunner != null)
                 {
                     var SMRunner = LCMSMSRunner.ScansTable.Next;
@@ -1571,6 +1559,7 @@ namespace TDAuditor
                         TSVbyScan.Write(SMRunner.ScanNumber + delim);
                         TSVbyScan.Write(SMRunner.ScanStartTime + delim);
                         TSVbyScan.Write(SMRunner.mzMLDissociation + delim);
+			TSVbyScan.Write(SMRunner.MatchedToDeconvolution + delim);
                         TSVbyScan.Write(SMRunner.mzMLPrecursorZ + delim);
                         TSVbyScan.Write(SMRunner.msAlignPrecursorZ + delim);
                         TSVbyScan.Write(SMRunner.msAlignPrecursorMass + delim);
