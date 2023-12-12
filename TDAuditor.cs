@@ -15,7 +15,7 @@ namespace TDAuditor
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20231208");
+            Console.WriteLine("beta version 20231212");
 	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
 	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
 	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -923,7 +923,7 @@ namespace TDAuditor
 			    case "PEPMASS":
 				SemiTokens = Tokens[1].Split(' ');
 				try {
-				    LastMass = double.Parse(SemiTokens[0], CultureInfo.InvariantCulture);
+				    LastMass = double.Parse(SemiTokens[1], CultureInfo.InvariantCulture);
 				}
 				catch (FormatException) {
 				    Console.Error.WriteLine("Mass could not be parsed from {0}", LineBuffer);
