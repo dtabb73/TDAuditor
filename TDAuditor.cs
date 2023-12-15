@@ -923,7 +923,7 @@ namespace TDAuditor
 			    case "PEPMASS":
 				SemiTokens = Tokens[1].Split(' ');
 				try {
-				    LastMass = double.Parse(SemiTokens[1], CultureInfo.InvariantCulture);
+				    LastMass = double.Parse(SemiTokens[0], CultureInfo.InvariantCulture);
 				}
 				catch (FormatException) {
 				    Console.Error.WriteLine("Mass could not be parsed from {0}", LineBuffer);
@@ -939,7 +939,7 @@ namespace TDAuditor
 					if (NumberFromString > ScanRunner.msAlignPrecursorZ)
 					{
 					    ScanRunner.msAlignPrecursorZ = NumberFromString;
-					    ScanRunner.msAlignPrecursorMass = LastMass;
+					    ScanRunner.msAlignPrecursorMass = (LastMass-1.00727647)*NumberFromString;
 					}
 				    }
 				}
