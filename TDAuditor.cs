@@ -15,7 +15,7 @@ namespace TDAuditor
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20231212");
+            Console.WriteLine("beta version 20240411");
 	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
 	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
 	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -716,10 +716,14 @@ namespace TDAuditor
                             case "MS:1002416":
                             case "MS:1002523":
                             case "MS:1002732":
+			    case "MS:1003028":
                             case "MS:1003029":
 			    case "MS:1003123":
 			    case "MS:1003293":
 			    case "MS:1003094":
+			    case "MS:1000932":
+			    case "MS:1003005":
+			    case "MS:1002533":
                                 Instrument = Xread.GetAttribute("name");
                                 break;
                             case "MS:1000529":
