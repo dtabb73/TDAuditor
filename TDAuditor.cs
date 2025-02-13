@@ -149,7 +149,10 @@ namespace TDAuditor
                 while (LineBuffer != null)
                 {
                     if (LineBuffer.StartsWith("FILE_NAME="))
-                        return LineBuffer.Substring(10, LineBuffer.Length - 15);
+		    {
+			var PathFile = LineBuffer.Substring(10, LineBuffer.Length - 15);
+                        return Path.GetFileNameWithoutExtension(PathFile);
+		    }
                     LineBuffer = msAlign.ReadLine();
                 }
             }
@@ -711,19 +714,22 @@ namespace TDAuditor
                               recompile.
                              */
                             case "MS:1000557":
+			    case "MS:1000932":
+			    case "MS:1001742":
                             case "MS:1001910":
                             case "MS:1001911":
                             case "MS:1002416":
                             case "MS:1002523":
+			    case "MS:1002533":
+			    case "MS:1002634":
                             case "MS:1002732":
+			    case "MS:1002877":
+			    case "MS:1003005":
 			    case "MS:1003028":
                             case "MS:1003029":
+			    case "MS:1003094":
 			    case "MS:1003123":
 			    case "MS:1003293":
-			    case "MS:1003094":
-			    case "MS:1000932":
-			    case "MS:1003005":
-			    case "MS:1002533":
                                 Instrument = Xread.GetAttribute("name");
                                 break;
                             case "MS:1000529":
@@ -1075,36 +1081,39 @@ namespace TDAuditor
                       equals symbol.
                     */
                     string[] Tokens;
+		    char[] Delimiters = {'=', ':'};
                     if (LineBuffer.Contains("="))
                     {
-                        Tokens = LineBuffer.Split('=');
+                        Tokens = LineBuffer.Split(Delimiters);
                         int NumberFromString;
-                        switch (Tokens[0])
-                        {
-                            case "SCANS":
-				try {
-				    NumberFromString = int.Parse(Tokens[1]);
-				    ScanRunner = this.GoToScan(NumberFromString);
-				    if (ScanRunner == null)
-				    {
-					Console.Error.WriteLine("Error seeking scan {0} from {1}", NumberFromString, PathAndFileName);
+			if (Tokens[1].Length > 0) {
+			    switch (Tokens[0])
+			    {
+				case "SCANS":
+				    try {
+					NumberFromString = int.Parse(Tokens[1]);
+					ScanRunner = this.GoToScan(NumberFromString);
+					if (ScanRunner == null)
+					{
+					    Console.Error.WriteLine("Error seeking scan {0} from {1}", NumberFromString, PathAndFileName);
+					}
+					else ScanRunner.MatchedToDeconvolution=true;
 				    }
-				    else ScanRunner.MatchedToDeconvolution=true;
-				}
-				catch (FormatException) {
-				    Console.Error.WriteLine("This SCANS number could not be parsed: {0}", LineBuffer);
-				}
-                                PeakList = new MSMSPeak();
-                                PeakRunner = PeakList;
-                                break;
-                            case "PRECURSOR_CHARGE":
-                                NumberFromString = int.Parse(Tokens[1]);
-                                ScanRunner.msAlignPrecursorZ = NumberFromString;
-                                break;
-                            case "PRECURSOR_MASS":
-                                ScanRunner.msAlignPrecursorMass = double.Parse(Tokens[1], CultureInfo.InvariantCulture);
-                                break;
-                        }
+				    catch (FormatException) {
+					Console.Error.WriteLine("This SCANS number could not be parsed: {0}", LineBuffer);
+				    }
+				    PeakList = new MSMSPeak();
+				    PeakRunner = PeakList;
+				    break;
+				case "PRECURSOR_CHARGE":
+				    NumberFromString = int.Parse(Tokens[1]);
+				    ScanRunner.msAlignPrecursorZ = NumberFromString;
+				    break;
+				case "PRECURSOR_MASS":
+				    ScanRunner.msAlignPrecursorMass = double.Parse(Tokens[1], CultureInfo.InvariantCulture);
+				    break;
+			    }
+			}
                     }
                     else if (LineBuffer.Length > 0 && char.IsDigit(LineBuffer[0]))
                     {
