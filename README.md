@@ -53,6 +53,7 @@ The file reports a relatively small set of metrics for each MSn scan in all inpu
 * ScanStartTime: the retention time at which this MS/MS was collected
 * mzMLDissociation: a string summarizing the type of fragmentation applied
 * mzMLPreZ: precursor charge as reported by instrument software
+* mzMLSelectedIon: the m/z value selected to produce this MS/MS
 * DeconvPreZ: precursor charge as reported by deconvolution software
 * DeconvPreMass: precursor Mass as reported by deconvolution software
 * mzMLPeakCount: number of m/z values with intensity in mzML peaklist
