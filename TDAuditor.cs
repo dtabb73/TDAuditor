@@ -14,8 +14,8 @@ namespace TDAuditor
             // Use periods to separate decimals
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
-            Console.WriteLine("David L. Tabb, for the Laboratory of Julia Chamot-Rooke, Institut Pasteur");
-            Console.WriteLine("beta version 20250327");
+            Console.WriteLine("David L. Tabb, University Medical Center of Groningen");
+            Console.WriteLine("beta version 20250403");
 	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
 	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
 	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -217,6 +217,7 @@ namespace TDAuditor
         public string mzMLDissociation = "";
         //TODO Should I record what dissociation type msAlign reports?
         public int mzMLPrecursorZ;
+	public int mzMLMassResolvingPower = 0;
 	public double mzMLSelectedIon = 0;
 	public bool MatchedToDeconvolution = false;
         public int msAlignPrecursorZ;
@@ -799,6 +800,10 @@ namespace TDAuditor
 			    case "MS:1000744":
 				var ThisMZ = Xread.GetAttribute("value");
 				ScansRunner.mzMLSelectedIon = double.Parse(ThisMZ);
+				break;
+			    case "MS:1000800":
+				var ThisPower = Xread.GetAttribute("value");
+				ScansRunner.mzMLMassResolvingPower = int.Parse(ThisPower);
 				break;
                             case "MS:1000133":
                                 ThisScanIsCID = true;
@@ -1566,7 +1571,7 @@ namespace TDAuditor
             LCMSMSRunner = this.Next;
             using (var TSVbyScan = new StreamWriter("TDAuditor-byMSn.tsv"))
             {
-                TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tMatchedToDeconvolution\tmzMLPreZ\tmzMLSelectedIon\tDeconvPreZ\tDeconvPreMass\tmzMLPeakCount\tDeconvPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
+                TSVbyScan.WriteLine("SourceFile\tNativeID\tScanNumber\tScanStartTime\tmzMLDissociation\tMatchedToDeconvolution\tmzMLPreZ\tmzMLSelectedIon\tmzMLMassResolvingPower\tDeconvPreZ\tDeconvPreMass\tmzMLPeakCount\tDeconvPeakCount\tDegree\tComponentNumber\tAALinkCount\tLongestTag");
                 while (LCMSMSRunner != null)
                 {
                     var SMRunner = LCMSMSRunner.ScansTable.Next;
@@ -1580,6 +1585,7 @@ namespace TDAuditor
 			TSVbyScan.Write(SMRunner.MatchedToDeconvolution + delim);
                         TSVbyScan.Write(SMRunner.mzMLPrecursorZ + delim);
 			TSVbyScan.Write(SMRunner.mzMLSelectedIon + delim);
+			TSVbyScan.Write(SMRunner.mzMLMassResolvingPower + delim);
                         TSVbyScan.Write(SMRunner.msAlignPrecursorZ + delim);
                         TSVbyScan.Write(SMRunner.msAlignPrecursorMass + delim);
                         TSVbyScan.Write(SMRunner.mzMLPeakCount + delim);
