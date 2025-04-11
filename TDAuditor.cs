@@ -4,6 +4,7 @@ using System.Xml;
 using System.Diagnostics;
 using System.Globalization;
 using System.Threading;
+using MzqcCsLib;
 
 namespace TDAuditor
 {
@@ -11,42 +12,37 @@ namespace TDAuditor
     {
         static void Main(string[] args)
         {
+            const string Version = "20250410 beta";
             // Use periods to separate decimals
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, University Medical Center of Groningen");
-            Console.WriteLine("beta version 20250403");
-	    Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
-	    Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
-	    Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
+            Console.WriteLine("Version ",Version);
+            Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
+            Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
+            Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
 
-            /*
-              TODO: Would like to have the following:
-              -What is the max resolution seen for MS scans?
-              -What is the max resolution seen for MSn scans?
-            */
-
-	    var ReadMGFnotMSAlign = false;
-	    var WriteConnectedComponents = false;
-	    var WriteDeNovoTags = false;
-	    foreach (var item in args)
-	    {
-		switch(item)
-		{
-		    case "--MGF":
-			ReadMGFnotMSAlign = true;
-			break;
-		    case "--CC":
-			WriteConnectedComponents = true;
-			break;
-		    case "--DN":
-			WriteDeNovoTags = true;
-			break;
-		    default:
-			Console.Error.WriteLine("\tError: I don't understand this argument: {0}.", item);
-			break;
-		}
-	    }
+            var ReadMGFnotMSAlign = false;
+            var WriteConnectedComponents = false;
+            var WriteDeNovoTags = false;
+            foreach (var item in args)
+            {
+                switch (item)
+                {
+                    case "--MGF":
+                        ReadMGFnotMSAlign = true;
+                        break;
+                    case "--CC":
+                        WriteConnectedComponents = true;
+                        break;
+                    case "--DN":
+                        WriteDeNovoTags = true;
+                        break;
+                    default:
+                        Console.Error.WriteLine("\tError: I don't understand this argument: {0}.", item);
+                        break;
+                }
+            }
             var CWD = Directory.GetCurrentDirectory();
             const string mzMLPattern = "*.mzML";
             var mzMLs = Directory.GetFiles(CWD, mzMLPattern);
@@ -57,9 +53,9 @@ namespace TDAuditor
             var Raws = new LCMSMSExperiment();
             var RawsRunner = Raws;
             string Basename;
-	    Stopwatch Timer = new Stopwatch();
-	    TimeSpan Duration;
-	    Timer.Start();
+            Stopwatch Timer = new Stopwatch();
+            TimeSpan Duration;
+            Timer.Start();
             Console.WriteLine("\nImporting from mzML files...");
             foreach (var current in mzMLs)
             {
@@ -70,75 +66,78 @@ namespace TDAuditor
                 var XMLfile = XmlReader.Create(FileSpec);
                 RawsRunner = RawsRunner.Next;
                 RawsRunner.SourceFile = Basename;
+                RawsRunner.FileURI = new Uri(current);
                 RawsRunner.ReadFromMZML(XMLfile);
                 RawsRunner.ParseScanNumbers();
             }
-	    Timer.Stop();
-	    Duration = Timer.Elapsed;
-	    Console.WriteLine("\tTime for mzML reading: {0}",Duration.ToString());
-	    Timer.Reset();
-	    Timer.Start();
-	    if (ReadMGFnotMSAlign == true)
-	    {
-		Console.WriteLine("\nImporting from ProSight PD MGF...");
-		foreach (var current in MGFs)
-		{
-		    Basename = Path.GetFileNameWithoutExtension(current);
-		    Console.WriteLine("\tReading MGF {0}", Basename);
-		    Raws.ReadFromMGF(current);
-		}
-		Raws.UpdateAllmsAlignStats();
-	    }
-	    else
-	    {
-		// TODO: The following will run into a problem if user has created a conjoint ms2.msalign file in TopPIC
-		Console.WriteLine("\nImporting from msAlign files...");
-		foreach (var current in msAligns)
-		{
-		    Basename = Path.GetFileNameWithoutExtension(current);
-		    Console.WriteLine("\tReading msAlign {0}", Basename);
-		    var SourcemzML = SniffMSAlignForSource(current);
-		    var CorrespondingRaw = Raws.Find(SourcemzML);
-		    if (CorrespondingRaw == null)
-		    {
-			Console.Error.WriteLine("\tWARNING: {0} could not be matched to an mzML title.", Basename);
-		    }
-		    else
-		    {
-			CorrespondingRaw.ReadFromMSAlign(current);
-		    }
-		}
-		Raws.UpdateAllmsAlignStats();
-		/*
-		  TODO: we should really check to see if any of the mzMLs
-		  lack corresponding msAlign files.
-		*/
-	    }
-	    Timer.Stop();
-	    Duration = Timer.Elapsed;
-	    Console.WriteLine("\tTime for deconvolution reading: {0}",Duration.ToString());
-	    Timer.Reset();
-	    Timer.Start();
+            Timer.Stop();
+            Duration = Timer.Elapsed;
+            Console.WriteLine("\tTime for mzML reading: {0}", Duration.ToString());
+            Timer.Reset();
+            Timer.Start();
+            if (ReadMGFnotMSAlign == true)
+            {
+                Console.WriteLine("\nImporting from ProSight PD MGF...");
+                foreach (var current in MGFs)
+                {
+                    Basename = Path.GetFileNameWithoutExtension(current);
+                    Console.WriteLine("\tReading MGF {0}", Basename);
+                    Raws.ReadFromMGF(current);
+                }
+                Raws.UpdateAllmsAlignStats();
+            }
+            else
+            {
+                // TODO: The following will run into a problem if user has created a conjoint ms2.msalign file in TopPIC
+                Console.WriteLine("\nImporting from msAlign files...");
+                foreach (var current in msAligns)
+                {
+                    Basename = Path.GetFileNameWithoutExtension(current);
+                    Console.WriteLine("\tReading msAlign {0}", Basename);
+                    var SourcemzML = SniffMSAlignForSource(current);
+                    var CorrespondingRaw = Raws.Find(SourcemzML);
+                    if (CorrespondingRaw == null)
+                    {
+                        Console.Error.WriteLine("\tWARNING: {0} could not be matched to an mzML title.", Basename);
+                    }
+                    else
+                    {
+                        CorrespondingRaw.ReadFromMSAlign(current);
+                    }
+                }
+                Raws.UpdateAllmsAlignStats();
+                /*
+                  TODO: we should really check to see if any of the mzMLs
+                  lack corresponding msAlign files.
+                */
+            }
+            Timer.Stop();
+            Duration = Timer.Elapsed;
+            Console.WriteLine("\tTime for deconvolution reading: {0}", Duration.ToString());
+            Timer.Reset();
+            Timer.Start();
             Console.WriteLine("\nSeeking MS/MS scan pairs with many shared masses...");
             Raws.FindSimilarSpectraWithinRaw(WriteConnectedComponents);
-	    Timer.Stop();
-	    Duration = Timer.Elapsed;
-	    Console.WriteLine("\tTime for similarity detection: {0}",Duration.ToString());
-	    Timer.Reset();
-	    Timer.Start();
+            Timer.Stop();
+            Duration = Timer.Elapsed;
+            Console.WriteLine("\tTime for similarity detection: {0}", Duration.ToString());
+            Timer.Reset();
+            Timer.Start();
             Console.WriteLine("\nGenerating sequence tags...");
             Raws.GenerateSequenceTags(WriteDeNovoTags);
-	    Timer.Stop();
-	    Duration = Timer.Elapsed;
-	    Console.WriteLine("\tTime for de novo inference: {0}",Duration.ToString());
-	    Timer.Reset();
-	    Timer.Start();
+            Timer.Stop();
+            Duration = Timer.Elapsed;
+            Console.WriteLine("\tTime for de novo inference: {0}", Duration.ToString());
+            Timer.Reset();
+            Timer.Start();
             Raws.ComputeDistributions();
             Console.WriteLine("\nWriting TDAuditor-byRun and TDAuditor-byMSn TSV reports...");
             Raws.WriteTextQCReport();
-	    Timer.Stop();
-	    Duration = Timer.Elapsed;
-	    Console.WriteLine("\tTime for computing quartiles and reporting: {0}",Duration.ToString());
+            Console.WriteLine("Writing TDAuditor.mzQC.JSON...");
+            Raws.WriteMZQCReport(Version);
+            Timer.Stop();
+            Duration = Timer.Elapsed;
+            Console.WriteLine("\tTime for computing quartiles and reporting: {0}", Duration.ToString());
         }
 
         static string SniffMSAlignForSource(string PathAndFile)
@@ -149,10 +148,10 @@ namespace TDAuditor
                 while (LineBuffer != null)
                 {
                     if (LineBuffer.StartsWith("FILE_NAME="))
-		    {
-			var PathFile = LineBuffer.Substring(10, LineBuffer.Length - 15);
+                    {
+                        var PathFile = LineBuffer.Substring(10, LineBuffer.Length - 15);
                         return Path.GetFileNameWithoutExtension(PathFile);
-		    }
+                    }
                     LineBuffer = msAlign.ReadLine();
                 }
             }
@@ -176,9 +175,9 @@ namespace TDAuditor
     class MassGap
     {
         public MSMSPeak NextPeak;
-        public double   ExpectedMass;
-	public int      AANumber;
-        public MassGap  Next;
+        public double ExpectedMass;
+        public int AANumber;
+        public MassGap Next;
 
         public int DepthTagSearch()
         {
@@ -217,9 +216,9 @@ namespace TDAuditor
         public string mzMLDissociation = "";
         //TODO Should I record what dissociation type msAlign reports?
         public int mzMLPrecursorZ;
-	public int mzMLMassResolvingPower = 0;
-	public double mzMLSelectedIon = 0;
-	public bool MatchedToDeconvolution = false;
+        public int mzMLMassResolvingPower = 0;
+        public double mzMLSelectedIon = 0;
+        public bool MatchedToDeconvolution = false;
         public int msAlignPrecursorZ;
         public double msAlignPrecursorMass = Double.NaN;
         public int mzMLPeakCount;
@@ -245,7 +244,7 @@ namespace TDAuditor
                           115.02694,128.05858,128.09496,129.04259,131.04049,137.05891,147.06841,156.10111,
                           163.06333,186.07931};
         public static string[] AminoAcidSymbols = { "G", "A", "S", "P", "V", "T", "C", "L/I", "N",
-						    "D", "Q", "K", "E", "M", "H", "F", "R", "Y", "W" };
+                            "D", "Q", "K", "E", "M", "H", "F", "R", "Y", "W" };
 
         public static void ComputeLogFactorials()
         {
@@ -321,8 +320,8 @@ namespace TDAuditor
                 var CombC = NumberOfPossibleMasses;
                 var CombD = Other.msAlignPeakCount;
                 var LPSum = ComputeLogCombinationCount(CombA, CombB) +
-		    ComputeLogCombinationCount(CombC - CombA, CombD - CombB) -
-		    ComputeLogCombinationCount(CombC, CombD);
+            ComputeLogCombinationCount(CombC - CombA, CombD - CombB) -
+            ComputeLogCombinationCount(CombC, CombD);
                 var MostMatchesPossible = Math.Min(this.msAlignPeakCount, Other.msAlignPeakCount);
                 /*
                   At the moment, LPSum equals the log probability of
@@ -330,14 +329,14 @@ namespace TDAuditor
                   the probabilities for cases with more peaks matching
                   than this.
                  */
-		/*
-                for (var MoreMatches = MatchesSoFar + 1; MoreMatches <= MostMatchesPossible; MoreMatches++)
-                {
-                    LPSum = sum_log_prob(LPSum, ComputeLogCombinationCount(CombA, MoreMatches) +
-					 ComputeLogCombinationCount(CombC - CombA, CombD - MoreMatches) -
-					 ComputeLogCombinationCount(CombC, CombD));
-                }
-		*/
+                /*
+                        for (var MoreMatches = MatchesSoFar + 1; MoreMatches <= MostMatchesPossible; MoreMatches++)
+                        {
+                            LPSum = sum_log_prob(LPSum, ComputeLogCombinationCount(CombA, MoreMatches) +
+                             ComputeLogCombinationCount(CombC - CombA, CombD - MoreMatches) -
+                             ComputeLogCombinationCount(CombC, CombD));
+                        }
+                */
                 var NegLogProbability = -LPSum;
                 return NegLogProbability;
             }
@@ -345,36 +344,36 @@ namespace TDAuditor
             return 0;
         }
 
-	public void GenerateForwardSimilarityLinks(object obj)
-	{
-	    var OtherScan = this.Next;
-	    var SimilarityRunner = this.SimilarScans;
-	    while (OtherScan != null)
-	    {
-		if (OtherScan.msAlignPeakCount > 0)
-		{
-		    // Test these two scans to determine if they have an improbable amount of deconvolved mass overlap.
-		    var ThisMatchScore = this.TestForSimilarity(OtherScan);
-		    /*
-		      100 is a very arbitrary threshold...
-		      ThisMatchScore is a log probability that the
-		      spectra would share this many overlapping peaks
-		      by random chance.
-		    */
-		    if (ThisMatchScore > 100)
-		    {
-			//Make a link between these MS/MS scans to reflect their high mass list overlap.
-			var SimBuffer = SimilarityRunner.Next;
-			SimilarityRunner.Next = new SimilarityLink();
-			SimilarityRunner = SimilarityRunner.Next;
-			SimilarityRunner.Other = OtherScan;
-			SimilarityRunner.Score = ThisMatchScore;
-			SimilarityRunner.Next = SimBuffer;
-		    }
-		}
-		OtherScan = OtherScan.Next;
-	    }
-	}
+        public void GenerateForwardSimilarityLinks(object obj)
+        {
+            var OtherScan = this.Next;
+            var SimilarityRunner = this.SimilarScans;
+            while (OtherScan != null)
+            {
+                if (OtherScan.msAlignPeakCount > 0)
+                {
+                    // Test these two scans to determine if they have an improbable amount of deconvolved mass overlap.
+                    var ThisMatchScore = this.TestForSimilarity(OtherScan);
+                    /*
+                      100 is a very arbitrary threshold...
+                      ThisMatchScore is a log probability that the
+                      spectra would share this many overlapping peaks
+                      by random chance.
+                    */
+                    if (ThisMatchScore > 100)
+                    {
+                        //Make a link between these MS/MS scans to reflect their high mass list overlap.
+                        var SimBuffer = SimilarityRunner.Next;
+                        SimilarityRunner.Next = new SimilarityLink();
+                        SimilarityRunner = SimilarityRunner.Next;
+                        SimilarityRunner.Other = OtherScan;
+                        SimilarityRunner.Score = ThisMatchScore;
+                        SimilarityRunner.Next = SimBuffer;
+                    }
+                }
+                OtherScan = OtherScan.Next;
+            }
+        }
 
         public int ComponentRecurse(int ComponentLabel)
         {
@@ -392,7 +391,7 @@ namespace TDAuditor
                 SizeContribution += SLRunner.Other.ComponentRecurse(ComponentLabel);
                 SLRunner = SLRunner.Next;
             }
-	    SLRunner = SimilarScansBeforeThis.Next;
+            SLRunner = SimilarScansBeforeThis.Next;
             while (SLRunner != null)
             {
                 SizeContribution += SLRunner.Other.ComponentRecurse(ComponentLabel);
@@ -401,137 +400,137 @@ namespace TDAuditor
             return SizeContribution;
         }
 
-	public void SequenceTagThisSpectrum(object obj)
-	{
-	    /*
-	      First, convert the array of mass values into a linked list again.
-	    */
-	    var LongestTagSoFar = 0;
-	    var PeakList = new MSMSPeak();
-	    var PRunner1 = PeakList;
-	    foreach (var ThisPeak in this.PeakMZs)
-	    {
-		PRunner1.Next = new MSMSPeak();
-		PRunner1 = PRunner1.Next;
-		PRunner1.Mass = ThisPeak;
-	    }
-	    /*
-	      Find the gaps corresponding to amino acid masses.
-	    */
-	    PRunner1 = PeakList.Next;
-	    MassGap MGBuffer;
-	    while (PRunner1 != null)
-	    {
-		var PRunner2 = PRunner1.Next;
-		while (PRunner2 != null)
-		{
-		    var MassDiff = PRunner2.Mass - PRunner1.Mass;
-		    var index = 0;
-		    foreach (var ThisAA in ScanMetrics.AminoAcids)
-		    {
-			var MassError = Math.Abs(MassDiff - ThisAA);
-			if (MassError < ScanMetrics.FragmentTolerance)
-			{
-			    // ThisAA corresponds in mass to the separation between these two peaks
-			    this.AALinkCount++;
-			    MGBuffer = PRunner1.AALinks;
-			    PRunner1.AALinks = new MassGap();
-			    PRunner1.AALinks.Next = MGBuffer;
-			    PRunner1.AALinks.NextPeak = PRunner2;
-			    PRunner1.AALinks.ExpectedMass = ThisAA;
-			    PRunner1.AALinks.AANumber = index;
-			}
-			index++;
-		    }
-		    PRunner2 = PRunner2.Next;
-		}
-		PRunner1 = PRunner1.Next;
-	    }
-	    /*
-	      Use recursion to seek the longest sequence
-	      for which each consecutive fragment exists.
-	    */
-	    PRunner1 = PeakList.Next;
-	    while (PRunner1 != null)
-	    {
-		if (PRunner1.LongestTagStartingHere == 0)
-		{
-		    MGBuffer = PRunner1.AALinks;
-		    while (MGBuffer != null)
-		    {
-			var ThisTagLength = MGBuffer.DepthTagSearch();
-			if (ThisTagLength > LongestTagSoFar)
-			{
-			    LongestTagSoFar = ThisTagLength;
-			}
-			MGBuffer = MGBuffer.Next;
-		    }
-		}
-		PRunner1 = PRunner1.Next;
-	    }
-	    this.LongestTag = LongestTagSoFar;
-	}
+        public void SequenceTagThisSpectrum(object obj)
+        {
+            /*
+              First, convert the array of mass values into a linked list again.
+            */
+            var LongestTagSoFar = 0;
+            var PeakList = new MSMSPeak();
+            var PRunner1 = PeakList;
+            foreach (var ThisPeak in this.PeakMZs)
+            {
+                PRunner1.Next = new MSMSPeak();
+                PRunner1 = PRunner1.Next;
+                PRunner1.Mass = ThisPeak;
+            }
+            /*
+              Find the gaps corresponding to amino acid masses.
+            */
+            PRunner1 = PeakList.Next;
+            MassGap MGBuffer;
+            while (PRunner1 != null)
+            {
+                var PRunner2 = PRunner1.Next;
+                while (PRunner2 != null)
+                {
+                    var MassDiff = PRunner2.Mass - PRunner1.Mass;
+                    var index = 0;
+                    foreach (var ThisAA in ScanMetrics.AminoAcids)
+                    {
+                        var MassError = Math.Abs(MassDiff - ThisAA);
+                        if (MassError < ScanMetrics.FragmentTolerance)
+                        {
+                            // ThisAA corresponds in mass to the separation between these two peaks
+                            this.AALinkCount++;
+                            MGBuffer = PRunner1.AALinks;
+                            PRunner1.AALinks = new MassGap();
+                            PRunner1.AALinks.Next = MGBuffer;
+                            PRunner1.AALinks.NextPeak = PRunner2;
+                            PRunner1.AALinks.ExpectedMass = ThisAA;
+                            PRunner1.AALinks.AANumber = index;
+                        }
+                        index++;
+                    }
+                    PRunner2 = PRunner2.Next;
+                }
+                PRunner1 = PRunner1.Next;
+            }
+            /*
+              Use recursion to seek the longest sequence
+              for which each consecutive fragment exists.
+            */
+            PRunner1 = PeakList.Next;
+            while (PRunner1 != null)
+            {
+                if (PRunner1.LongestTagStartingHere == 0)
+                {
+                    MGBuffer = PRunner1.AALinks;
+                    while (MGBuffer != null)
+                    {
+                        var ThisTagLength = MGBuffer.DepthTagSearch();
+                        if (ThisTagLength > LongestTagSoFar)
+                        {
+                            LongestTagSoFar = ThisTagLength;
+                        }
+                        MGBuffer = MGBuffer.Next;
+                    }
+                }
+                PRunner1 = PRunner1.Next;
+            }
+            this.LongestTag = LongestTagSoFar;
+        }
 
-	public void WriteDeNovoGraph(string Filename)
-	{
-	    /* It's a kludge to copy so much code from the above
-	     * function for this, but I don't want multiple threads
-	     * all trying to write their graphs to disk at once. */
-	    var PeakList = new MSMSPeak();
-	    var PRunner1 = PeakList;
-	    foreach (var ThisPeak in this.PeakMZs)
-	    {
-		PRunner1.Next = new MSMSPeak();
-		PRunner1 = PRunner1.Next;
-		PRunner1.Mass = ThisPeak;
-	    }
-	    /*
-	      Find the gaps corresponding to amino acid masses.
-	    */
-	    PRunner1 = PeakList.Next;
-	    MassGap MGBuffer;
-	    while (PRunner1 != null)
-	    {
-		var PRunner2 = PRunner1.Next;
-		while (PRunner2 != null)
-		{
-		    var MassDiff = PRunner2.Mass - PRunner1.Mass;
-		    var index = 0;
-		    foreach (var ThisAA in ScanMetrics.AminoAcids)
-		    {
-			var MassError = Math.Abs(MassDiff - ThisAA);
-			if (MassError < ScanMetrics.FragmentTolerance)
-			{
-			    // ThisAA corresponds in mass to the separation between these two peaks
-			    MGBuffer = PRunner1.AALinks;
-			    PRunner1.AALinks = new MassGap();
-			    PRunner1.AALinks.Next = MGBuffer;
-			    PRunner1.AALinks.NextPeak = PRunner2;
-			    PRunner1.AALinks.ExpectedMass = ThisAA;
-			    PRunner1.AALinks.AANumber = index;
-			}
-			index++;
-		    }
-		    PRunner2 = PRunner2.Next;
-		}
-		PRunner1 = PRunner1.Next;
-	    }
-	    StreamWriter DOTFile = new StreamWriter(Filename);
-	    DOTFile.WriteLine("graph DeNovo {");
-	    PRunner1 = PeakList.Next;
-	    while (PRunner1 != null)
-	    {
-		MGBuffer = PRunner1.AALinks;
-		while (MGBuffer != null)
-		{
-		    DOTFile.WriteLine(Math.Round(PRunner1.Mass,3) + "--" + Math.Round(MGBuffer.NextPeak.Mass,3) + " [label=\"" + ScanMetrics.AminoAcidSymbols[MGBuffer.AANumber] +"\"]");
-		    MGBuffer = MGBuffer.Next;
-		}
-		PRunner1 = PRunner1.Next;
-	    }
-	    DOTFile.WriteLine("}");
-	    DOTFile.Flush();
-	}
+        public void WriteDeNovoGraph(string Filename)
+        {
+            /* It's a kludge to copy so much code from the above
+             * function for this, but I don't want multiple threads
+             * all trying to write their graphs to disk at once. */
+            var PeakList = new MSMSPeak();
+            var PRunner1 = PeakList;
+            foreach (var ThisPeak in this.PeakMZs)
+            {
+                PRunner1.Next = new MSMSPeak();
+                PRunner1 = PRunner1.Next;
+                PRunner1.Mass = ThisPeak;
+            }
+            /*
+              Find the gaps corresponding to amino acid masses.
+            */
+            PRunner1 = PeakList.Next;
+            MassGap MGBuffer;
+            while (PRunner1 != null)
+            {
+                var PRunner2 = PRunner1.Next;
+                while (PRunner2 != null)
+                {
+                    var MassDiff = PRunner2.Mass - PRunner1.Mass;
+                    var index = 0;
+                    foreach (var ThisAA in ScanMetrics.AminoAcids)
+                    {
+                        var MassError = Math.Abs(MassDiff - ThisAA);
+                        if (MassError < ScanMetrics.FragmentTolerance)
+                        {
+                            // ThisAA corresponds in mass to the separation between these two peaks
+                            MGBuffer = PRunner1.AALinks;
+                            PRunner1.AALinks = new MassGap();
+                            PRunner1.AALinks.Next = MGBuffer;
+                            PRunner1.AALinks.NextPeak = PRunner2;
+                            PRunner1.AALinks.ExpectedMass = ThisAA;
+                            PRunner1.AALinks.AANumber = index;
+                        }
+                        index++;
+                    }
+                    PRunner2 = PRunner2.Next;
+                }
+                PRunner1 = PRunner1.Next;
+            }
+            StreamWriter DOTFile = new StreamWriter(Filename);
+            DOTFile.WriteLine("graph DeNovo {");
+            PRunner1 = PeakList.Next;
+            while (PRunner1 != null)
+            {
+                MGBuffer = PRunner1.AALinks;
+                while (MGBuffer != null)
+                {
+                    DOTFile.WriteLine(Math.Round(PRunner1.Mass, 3) + "--" + Math.Round(MGBuffer.NextPeak.Mass, 3) + " [label=\"" + ScanMetrics.AminoAcidSymbols[MGBuffer.AANumber] + "\"]");
+                    MGBuffer = MGBuffer.Next;
+                }
+                PRunner1 = PRunner1.Next;
+            }
+            DOTFile.WriteLine("}");
+            DOTFile.Flush();
+        }
     }
 
     class LCMSMSExperiment
@@ -541,13 +540,15 @@ namespace TDAuditor
         public string Instrument = "";
         public string SerialNumber = "";
         public string StartTimeStamp = "";
+        public string DeconvolutionEngine = "";
         public float MaxScanStartTime;
+        public Uri FileURI;
         // Computed fields
         public int mzMLMS1Count;
         public int mzMLMSnCount;
-	public int MatchedToDeconvolution;
+        public int MatchedToDeconvolution;
         public int msAlignMSnCount;
-	// This next count includes only the MSn scans with zero peaks in their deconvolutions
+        // This next count includes only the MSn scans with zero peaks in their deconvolutions
         public int msAlignMSnCount0;
         /*
           The following metrics characterize the extent to which MSn
@@ -578,15 +579,15 @@ namespace TDAuditor
         public int[] mzMLPrecursorZQuartiles;
         public int[] msAlignPrecursorZDistn = new int[MaxZ + 1];
         public int[] msAlignPrecursorZQuartiles;
-	public double[] msAlignPrecursorMassQuartiles = new double[5];
+        public double[] msAlignPrecursorMassQuartiles = new double[5];
         public int[] mzMLPeakCountDistn = new int[MaxPkCount + 1];
         public int[] mzMLPeakCountQuartiles;
         public int[] msAlignPeakCountDistn = new int[MaxPkCount + 1];
         public int[] msAlignPeakCountQuartiles;
-	public int   AALinkCountAbove2 = 0;
+        public int AALinkCountAbove2 = 0;
         public int[] AALinkCountDistn = new int[MaxPkCount + 1];
         public int[] AALinkCountQuartiles;
-	public int   LongestTagAbove2 = 0;
+        public int LongestTagAbove2 = 0;
         public int[] LongestTagDistn = new int[MaxLength + 1];
         public int[] LongestTagQuartiles;
         // Per-scan metrics
@@ -716,22 +717,22 @@ namespace TDAuditor
                               recompile.
                              */
                             case "MS:1000557":
-			    case "MS:1000932":
-			    case "MS:1001742":
+                            case "MS:1000932":
+                            case "MS:1001742":
                             case "MS:1001910":
                             case "MS:1001911":
                             case "MS:1002416":
                             case "MS:1002523":
-			    case "MS:1002533":
-			    case "MS:1002634":
+                            case "MS:1002533":
+                            case "MS:1002634":
                             case "MS:1002732":
-			    case "MS:1002877":
-			    case "MS:1003005":
-			    case "MS:1003028":
+                            case "MS:1002877":
+                            case "MS:1003005":
+                            case "MS:1003028":
                             case "MS:1003029":
-			    case "MS:1003094":
-			    case "MS:1003123":
-			    case "MS:1003293":
+                            case "MS:1003094":
+                            case "MS:1003123":
+                            case "MS:1003293":
                                 Instrument = Xread.GetAttribute("name");
                                 break;
                             case "MS:1000529":
@@ -797,14 +798,14 @@ namespace TDAuditor
                                     Console.Error.WriteLine("Maximum charge of {0} is less than mzML charge {1}.", MaxZ, ThisChargeInt);
                                 }
                                 break;
-			    case "MS:1000744":
-				var ThisMZ = Xread.GetAttribute("value");
-				ScansRunner.mzMLSelectedIon = double.Parse(ThisMZ);
-				break;
-			    case "MS:1000800":
-				var ThisPower = Xread.GetAttribute("value");
-				ScansRunner.mzMLMassResolvingPower = int.Parse(ThisPower);
-				break;
+                            case "MS:1000744":
+                                var ThisMZ = Xread.GetAttribute("value");
+                                ScansRunner.mzMLSelectedIon = double.Parse(ThisMZ);
+                                break;
+                            case "MS:1000800":
+                                var ThisPower = Xread.GetAttribute("value");
+                                ScansRunner.mzMLMassResolvingPower = int.Parse(ThisPower);
+                                break;
                             case "MS:1000133":
                                 ThisScanIsCID = true;
                                 break;
@@ -861,18 +862,18 @@ namespace TDAuditor
             {
                 // Example of Thermo NativeID: controllerType=0 controllerNumber=1 scan=12 (ProteoWizard)
                 // Example of SCIEX NativeID: sample=1 period=1 cycle=806 experiment=2 (ProteoWizard)
-		// Example of SCIEX NativeID: sample=1 period=1 cycle=7207 experiment=1 (SCIEX MS Data Converter)
+                // Example of SCIEX NativeID: sample=1 period=1 cycle=7207 experiment=1 (SCIEX MS Data Converter)
                 // Example of Bruker NativeID: scan=55 (TIMSConvert)
                 // Example of Bruker NativeID: merged=102 frame=13 scanStart=810 scanEnd=834 (ProteoWizard)
                 var Tokens = SRunner.NativeID.Split(' ');
-		foreach (var ThisTerm in Tokens)
-		{
-		    var Tokens2 = ThisTerm.Split('=');
-		    if ( Tokens2[0].Equals("cycle") || Tokens2[0].Equals("scan") || Tokens2[0].Equals("scanStart") )
-		    {
-			SRunner.ScanNumber = int.Parse(Tokens2[1]);
-		    }
-		}
+                foreach (var ThisTerm in Tokens)
+                {
+                    var Tokens2 = ThisTerm.Split('=');
+                    if (Tokens2[0].Equals("cycle") || Tokens2[0].Equals("scan") || Tokens2[0].Equals("scanStart"))
+                    {
+                        SRunner.ScanNumber = int.Parse(Tokens2[1]);
+                    }
+                }
                 SRunner = SRunner.Next;
             }
         }
@@ -888,22 +889,23 @@ namespace TDAuditor
             }
             return null;
         }
-	
-	public void ReadFromMGF(string PathAndFileName)
-	{
-	    using (var MGFFile = new StreamReader(PathAndFileName))
-	    {
-		var LineBuffer = MGFFile.ReadLine();
-		var LastBasename = "";
-		double LastMass=0;
-		LCMSMSExperiment RawRunner = this;
-		ScanMetrics ScanRunner = null;
-		MSMSPeak PeakList = null;
-		MSMSPeak PeakRunner = null;
-		while (LineBuffer != null)
-		{
+
+        public void ReadFromMGF(string PathAndFileName)
+        {
+            using (var MGFFile = new StreamReader(PathAndFileName))
+            {
+                var LineBuffer = MGFFile.ReadLine();
+                var LastBasename = "";
+                double LastMass = 0;
+                LCMSMSExperiment RawRunner = this;
+                ScanMetrics ScanRunner = null;
+                MSMSPeak PeakList = null;
+                MSMSPeak PeakRunner = null;
+                this.DeconvolutionEngine = "ProteomeDiscoverer:Xtract";
+                while (LineBuffer != null)
+                {
                     string[] Tokens;
-		    string[] SemiTokens;
+                    string[] SemiTokens;
                     if (LineBuffer.Contains("="))
                     {
                         Tokens = LineBuffer.Split('=');
@@ -911,69 +913,75 @@ namespace TDAuditor
                         switch (Tokens[0])
                         {
                             case "TITLE":
-				SemiTokens = Tokens[1].Split('\"');
-				var Basename = Path.GetFileNameWithoutExtension(SemiTokens[1]);
-				var Scan = SemiTokens[7];
-				if (!LastBasename.Equals(Basename))
-				{
-				    Console.WriteLine("\t\tHandling spectra from {0}",Basename);
-				    LastBasename = Basename;
-				}
-				//Now advance our runners to the corresponding scan in the corresponding RAW...
-				RawRunner = this.Find(Basename);
-				if (RawRunner == null)
-				{
-				    Console.Error.WriteLine("Error!  Could not find {0} among mzMLs.",Basename);
-				}
-				else
-				{
-				    try {
-					NumberFromString = int.Parse(Scan);
-					PeakList = new MSMSPeak();
-					PeakRunner = PeakList;
-					ScanRunner = RawRunner.GoToScan(NumberFromString);
-					if (ScanRunner == null) Console.Error.WriteLine("Error!  Could not find scan {0}.",NumberFromString);
-					else ScanRunner.MatchedToDeconvolution = true;
-				    }
-				    catch (FormatException) {
-					Console.Error.WriteLine("Scan number could not be parsed from {0}", LineBuffer);
-				    }
-				}
-				break;
-			    case "PEPMASS":
-				SemiTokens = Tokens[1].Split(' ');
-				try {
-				    LastMass = double.Parse(SemiTokens[0], CultureInfo.InvariantCulture);
-				}
-				catch (FormatException) {
-				    Console.Error.WriteLine("Mass could not be parsed from {0}", LineBuffer);
-				}
-				break;
-			    case "CHARGE":
-				SemiTokens = Tokens[1].Split(new Char[] {'+','-'});
-				try {
-				    NumberFromString = int.Parse(SemiTokens[0]);
-				    if ((RawRunner != null) && (ScanRunner != null))
-				    {
-					// We want to the final precursor charge for each scan to be the highest of multiple possibilities that Xtract puts forward.
-					if (NumberFromString > ScanRunner.msAlignPrecursorZ)
-					{
-					    ScanRunner.msAlignPrecursorZ = NumberFromString;
-					    ScanRunner.msAlignPrecursorMass = (LastMass-1.00727647)*NumberFromString;
-					}
-				    }
-				}
-				catch (FormatException) {
-				    Console.Error.WriteLine("Charge could not be parsed from {0}", LineBuffer);
-				}
-				break;
-			    default:
-				break;
-			}
-		    }
-		    else if (LineBuffer.Length > 0 && char.IsDigit(LineBuffer[0]))
-		    {
-			//This is a line containing a deconvolved mass, intensity, and original charge, delimited by whitespace
+                                SemiTokens = Tokens[1].Split('\"');
+                                var Basename = Path.GetFileNameWithoutExtension(SemiTokens[1]);
+                                var Scan = SemiTokens[7];
+                                if (!LastBasename.Equals(Basename))
+                                {
+                                    Console.WriteLine("\t\tHandling spectra from {0}", Basename);
+                                    LastBasename = Basename;
+                                }
+                                //Now advance our runners to the corresponding scan in the corresponding RAW...
+                                RawRunner = this.Find(Basename);
+                                if (RawRunner == null)
+                                {
+                                    Console.Error.WriteLine("Error!  Could not find {0} among mzMLs.", Basename);
+                                }
+                                else
+                                {
+                                    try
+                                    {
+                                        NumberFromString = int.Parse(Scan);
+                                        PeakList = new MSMSPeak();
+                                        PeakRunner = PeakList;
+                                        ScanRunner = RawRunner.GoToScan(NumberFromString);
+                                        if (ScanRunner == null) Console.Error.WriteLine("Error!  Could not find scan {0}.", NumberFromString);
+                                        else ScanRunner.MatchedToDeconvolution = true;
+                                    }
+                                    catch (FormatException)
+                                    {
+                                        Console.Error.WriteLine("Scan number could not be parsed from {0}", LineBuffer);
+                                    }
+                                }
+                                break;
+                            case "PEPMASS":
+                                SemiTokens = Tokens[1].Split(' ');
+                                try
+                                {
+                                    LastMass = double.Parse(SemiTokens[0], CultureInfo.InvariantCulture);
+                                }
+                                catch (FormatException)
+                                {
+                                    Console.Error.WriteLine("Mass could not be parsed from {0}", LineBuffer);
+                                }
+                                break;
+                            case "CHARGE":
+                                SemiTokens = Tokens[1].Split(new Char[] { '+', '-' });
+                                try
+                                {
+                                    NumberFromString = int.Parse(SemiTokens[0]);
+                                    if ((RawRunner != null) && (ScanRunner != null))
+                                    {
+                                        // We want to the final precursor charge for each scan to be the highest of multiple possibilities that Xtract puts forward.
+                                        if (NumberFromString > ScanRunner.msAlignPrecursorZ)
+                                        {
+                                            ScanRunner.msAlignPrecursorZ = NumberFromString;
+                                            ScanRunner.msAlignPrecursorMass = (LastMass - 1.00727647) * NumberFromString;
+                                        }
+                                    }
+                                }
+                                catch (FormatException)
+                                {
+                                    Console.Error.WriteLine("Charge could not be parsed from {0}", LineBuffer);
+                                }
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                    else if (LineBuffer.Length > 0 && char.IsDigit(LineBuffer[0]))
+                    {
+                        //This is a line containing a deconvolved mass, intensity, and original charge, delimited by whitespace
                         Tokens = LineBuffer.Split(null);
                         PeakRunner.Next = new MSMSPeak();
                         /*
@@ -984,81 +992,83 @@ namespace TDAuditor
                         PeakRunner = PeakRunner.Next;
                         PeakRunner.Mass = double.Parse(Tokens[0], CultureInfo.InvariantCulture);
                         PeakRunner.Intensity = float.Parse(Tokens[1], CultureInfo.InvariantCulture);
-			//ProSightPD does not write fragment mass charges.
+                        //ProSightPD does not write fragment mass charges.
                         //PeakRunner.OrigZ = int.Parse(Tokens[2]);
-		    }
+                    }
                     else if (LineBuffer == "END IONS")
                     {
-			if ((RawRunner != null) && (ScanRunner != null))
-			{
-			    if (ScanRunner.PeakMZs == null) {
-				// Copy the linked list masses to an array and sort it.
-				var PeakCount = 0;
-				PeakRunner = PeakList.Next;
-				while (PeakRunner != null)
-				{
-				    PeakCount++;
-				    PeakRunner = PeakRunner.Next;
-				}
-				ScanRunner.PeakMZs = new double[PeakCount];
-				var Offset = 0;
-				PeakRunner = PeakList.Next;
-				while (PeakRunner != null)
-				{
-				    ScanRunner.PeakMZs[Offset] = PeakRunner.Mass;
-				    Offset++;
-				    PeakRunner = PeakRunner.Next;
-				}
-				Array.Sort(ScanRunner.PeakMZs);
-				ScanRunner.msAlignPeakCount=PeakCount;
-			    }
-			}
+                        if ((RawRunner != null) && (ScanRunner != null))
+                        {
+                            if (ScanRunner.PeakMZs == null)
+                            {
+                                // Copy the linked list masses to an array and sort it.
+                                var PeakCount = 0;
+                                PeakRunner = PeakList.Next;
+                                while (PeakRunner != null)
+                                {
+                                    PeakCount++;
+                                    PeakRunner = PeakRunner.Next;
+                                }
+                                ScanRunner.PeakMZs = new double[PeakCount];
+                                var Offset = 0;
+                                PeakRunner = PeakList.Next;
+                                while (PeakRunner != null)
+                                {
+                                    ScanRunner.PeakMZs[Offset] = PeakRunner.Mass;
+                                    Offset++;
+                                    PeakRunner = PeakRunner.Next;
+                                }
+                                Array.Sort(ScanRunner.PeakMZs);
+                                ScanRunner.msAlignPeakCount = PeakCount;
+                            }
+                        }
                     }
-		    LineBuffer = MGFFile.ReadLine();
-		}
-	    }
-	}
+                    LineBuffer = MGFFile.ReadLine();
+                }
+            }
+        }
 
-	public void UpdateAllmsAlignStats()
-	{
-	    //Now that we're done reading the deconvolutions, let's record our summary statistics.
-	    var RawRunner = this.Next;
-	    while (RawRunner != null)
-	    {
-		var ScanRunner = RawRunner.ScansTable.Next;
-		while (ScanRunner != null)
-		{
-		    if (ScanRunner.MatchedToDeconvolution) {
-			RawRunner.MatchedToDeconvolution++;
-			//Update msAlignMSnCount
-			RawRunner.msAlignMSnCount++;
-			//Update msAlignMSnCount0
-			if (ScanRunner.msAlignPeakCount == 0) RawRunner.msAlignMSnCount0++;
-			//Update msAlignPrecursorZDistn
-			try
-			{
-			    RawRunner.msAlignPrecursorZDistn[ScanRunner.msAlignPrecursorZ]++;
-			}
-			catch (IndexOutOfRangeException)
-			{
-			    Console.Error.WriteLine("Reported precursor charge of {0} is greater than ceiling of {1}.", ScanRunner.msAlignPrecursorZ, MaxZ);
-			}
-			//Update msAlignPeakCountDistn
-			if (ScanRunner.msAlignPeakCount > MaxPkCount)
-			{
-			    RawRunner.msAlignPeakCountDistn[MaxPkCount]++;
-			}
-			else
-			{
-			    RawRunner.msAlignPeakCountDistn[ScanRunner.msAlignPeakCount]++;
-			}
-		    }
-		    ScanRunner = ScanRunner.Next;
-		}
-		RawRunner = RawRunner.Next;
-	    }	    
-	}
-	
+        public void UpdateAllmsAlignStats()
+        {
+            //Now that we're done reading the deconvolutions, let's record our summary statistics.
+            var RawRunner = this.Next;
+            while (RawRunner != null)
+            {
+                var ScanRunner = RawRunner.ScansTable.Next;
+                while (ScanRunner != null)
+                {
+                    if (ScanRunner.MatchedToDeconvolution)
+                    {
+                        RawRunner.MatchedToDeconvolution++;
+                        //Update msAlignMSnCount
+                        RawRunner.msAlignMSnCount++;
+                        //Update msAlignMSnCount0
+                        if (ScanRunner.msAlignPeakCount == 0) RawRunner.msAlignMSnCount0++;
+                        //Update msAlignPrecursorZDistn
+                        try
+                        {
+                            RawRunner.msAlignPrecursorZDistn[ScanRunner.msAlignPrecursorZ]++;
+                        }
+                        catch (IndexOutOfRangeException)
+                        {
+                            Console.Error.WriteLine("Reported precursor charge of {0} is greater than ceiling of {1}.", ScanRunner.msAlignPrecursorZ, MaxZ);
+                        }
+                        //Update msAlignPeakCountDistn
+                        if (ScanRunner.msAlignPeakCount > MaxPkCount)
+                        {
+                            RawRunner.msAlignPeakCountDistn[MaxPkCount]++;
+                        }
+                        else
+                        {
+                            RawRunner.msAlignPeakCountDistn[ScanRunner.msAlignPeakCount]++;
+                        }
+                    }
+                    ScanRunner = ScanRunner.Next;
+                }
+                RawRunner = RawRunner.Next;
+            }
+        }
+
         public void ReadFromMSAlign(string PathAndFileName)
         {
             /*
@@ -1079,6 +1089,8 @@ namespace TDAuditor
             using (var msAlign = new StreamReader(PathAndFileName))
             {
                 var LineBuffer = msAlign.ReadLine();
+                if (LineBuffer == "#FLASHDeconv generated msalign file") this.DeconvolutionEngine = "FLASHDeconv";
+                if (LineBuffer.StartsWith("#TopFD")) this.DeconvolutionEngine = "TopFD";
                 ScanMetrics ScanRunner = null;
                 MSMSPeak PeakList = null;
                 MSMSPeak PeakRunner = null;
@@ -1091,39 +1103,42 @@ namespace TDAuditor
                       equals symbol.
                     */
                     string[] Tokens;
-		    char[] Delimiters = {'=', ':'};
+                    char[] Delimiters = { '=', ':' };
                     if (LineBuffer.Contains("="))
                     {
                         Tokens = LineBuffer.Split(Delimiters);
                         int NumberFromString;
-			if (Tokens[1].Length > 0) {
-			    switch (Tokens[0])
-			    {
-				case "SCANS":
-				    try {
-					NumberFromString = int.Parse(Tokens[1]);
-					ScanRunner = this.GoToScan(NumberFromString);
-					if (ScanRunner == null)
-					{
-					    Console.Error.WriteLine("Error seeking scan {0} from {1}", NumberFromString, PathAndFileName);
-					}
-					else ScanRunner.MatchedToDeconvolution=true;
-				    }
-				    catch (FormatException) {
-					Console.Error.WriteLine("This SCANS number could not be parsed: {0}", LineBuffer);
-				    }
-				    PeakList = new MSMSPeak();
-				    PeakRunner = PeakList;
-				    break;
-				case "PRECURSOR_CHARGE":
-				    NumberFromString = int.Parse(Tokens[1]);
-				    ScanRunner.msAlignPrecursorZ = NumberFromString;
-				    break;
-				case "PRECURSOR_MASS":
-				    ScanRunner.msAlignPrecursorMass = double.Parse(Tokens[1], CultureInfo.InvariantCulture);
-				    break;
-			    }
-			}
+                        if (Tokens[1].Length > 0)
+                        {
+                            switch (Tokens[0])
+                            {
+                                case "SCANS":
+                                    try
+                                    {
+                                        NumberFromString = int.Parse(Tokens[1]);
+                                        ScanRunner = this.GoToScan(NumberFromString);
+                                        if (ScanRunner == null)
+                                        {
+                                            Console.Error.WriteLine("Error seeking scan {0} from {1}", NumberFromString, PathAndFileName);
+                                        }
+                                        else ScanRunner.MatchedToDeconvolution = true;
+                                    }
+                                    catch (FormatException)
+                                    {
+                                        Console.Error.WriteLine("This SCANS number could not be parsed: {0}", LineBuffer);
+                                    }
+                                    PeakList = new MSMSPeak();
+                                    PeakRunner = PeakList;
+                                    break;
+                                case "PRECURSOR_CHARGE":
+                                    NumberFromString = int.Parse(Tokens[1]);
+                                    ScanRunner.msAlignPrecursorZ = NumberFromString;
+                                    break;
+                                case "PRECURSOR_MASS":
+                                    ScanRunner.msAlignPrecursorMass = double.Parse(Tokens[1], CultureInfo.InvariantCulture);
+                                    break;
+                            }
+                        }
                     }
                     else if (LineBuffer.Length > 0 && char.IsDigit(LineBuffer[0]))
                     {
@@ -1178,48 +1193,48 @@ namespace TDAuditor
                     {
                         // NonVacantScanCount should, in the end, be the same as msAlignMSnCount - msAlignMSnCount0
                         NonVacantScanCount++;
-			//SMRunner.GenerateForwardSimilarityLinks();
-			ThreadPool.QueueUserWorkItem(new WaitCallback(SMRunner.GenerateForwardSimilarityLinks));
-		    }
+                        //SMRunner.GenerateForwardSimilarityLinks();
+                        ThreadPool.QueueUserWorkItem(new WaitCallback(SMRunner.GenerateForwardSimilarityLinks));
+                    }
                     SMRunner = SMRunner.Next;
                 }
-		// Here we need to wait until all those queued threads are complete
-		var StillRunning = true;
-		var junk = 0;
-		var maxWorkerThreads = 0;
-		var WorkerThreads = 0;
-		ThreadPool.GetMaxThreads(out maxWorkerThreads, out junk);
-		while (StillRunning)
-		{
-		    ThreadPool.GetAvailableThreads(out WorkerThreads, out junk);
-		    //Console.WriteLine("Workers: {0}, Max: {1}",WorkerThreads, maxWorkerThreads);
-		    if (WorkerThreads == maxWorkerThreads)
-		    {
-			StillRunning=false;
-		    }
-		    else
-		    {
-			Thread.Sleep(100);
-		    }
-		}
-		// Having made our forward links in parallel, we now create the reverse links so we can find connected components.
-		SMRunner = LCMSMSRunner.ScansTable.Next;
-		while (SMRunner != null)
-		{
-		    var SimilarityRunner = SMRunner.SimilarScans.Next;
-		    while (SimilarityRunner != null)
-		    {
-			var OtherScan = SimilarityRunner.Other;
-			var OtherSimBuffer = OtherScan.SimilarScansBeforeThis.Next;
-			OtherScan.SimilarScansBeforeThis.Next = new SimilarityLink();
-			OtherScan.SimilarScansBeforeThis.Next.Next = OtherSimBuffer;
-			OtherScan.SimilarScansBeforeThis.Next.Other = SMRunner;
-			OtherScan.SimilarScansBeforeThis.Next.Score = SimilarityRunner.Score;
-			SimilarityRunner = SimilarityRunner.Next;
-			LinkCount++;
-		    }
-		    SMRunner = SMRunner.Next;
-		}
+                // Here we need to wait until all those queued threads are complete
+                var StillRunning = true;
+                var junk = 0;
+                var maxWorkerThreads = 0;
+                var WorkerThreads = 0;
+                ThreadPool.GetMaxThreads(out maxWorkerThreads, out junk);
+                while (StillRunning)
+                {
+                    ThreadPool.GetAvailableThreads(out WorkerThreads, out junk);
+                    //Console.WriteLine("Workers: {0}, Max: {1}",WorkerThreads, maxWorkerThreads);
+                    if (WorkerThreads == maxWorkerThreads)
+                    {
+                        StillRunning = false;
+                    }
+                    else
+                    {
+                        Thread.Sleep(100);
+                    }
+                }
+                // Having made our forward links in parallel, we now create the reverse links so we can find connected components.
+                SMRunner = LCMSMSRunner.ScansTable.Next;
+                while (SMRunner != null)
+                {
+                    var SimilarityRunner = SMRunner.SimilarScans.Next;
+                    while (SimilarityRunner != null)
+                    {
+                        var OtherScan = SimilarityRunner.Other;
+                        var OtherSimBuffer = OtherScan.SimilarScansBeforeThis.Next;
+                        OtherScan.SimilarScansBeforeThis.Next = new SimilarityLink();
+                        OtherScan.SimilarScansBeforeThis.Next.Next = OtherSimBuffer;
+                        OtherScan.SimilarScansBeforeThis.Next.Other = SMRunner;
+                        OtherScan.SimilarScansBeforeThis.Next.Score = SimilarityRunner.Score;
+                        SimilarityRunner = SimilarityRunner.Next;
+                        LinkCount++;
+                    }
+                    SMRunner = SMRunner.Next;
+                }
                 if (LinkCount == 0)
                 {
                     LCMSMSRunner.Redundancy = 0;
@@ -1250,7 +1265,7 @@ namespace TDAuditor
                         ThisDegree++;
                         SLRunner = SLRunner.Next;
                     }
-		    SLRunner = SMRunner.SimilarScansBeforeThis.Next;
+                    SLRunner = SMRunner.SimilarScansBeforeThis.Next;
                     while (SLRunner != null)
                     {
                         ThisDegree++;
@@ -1292,10 +1307,10 @@ namespace TDAuditor
                 }
                 LCMSMSRunner.ComponentCount = ComponentCount;
                 //Only produce the graphical output of the biggest component if the command line indicates that is desired.
-		if (WriteConnectedComponents)
-		{
-		    LCMSMSRunner.GraphVizPrintComponent(LCMSMSRunner.LargestComponentIndex);
-		}
+                if (WriteConnectedComponents)
+                {
+                    LCMSMSRunner.GraphVizPrintComponent(LCMSMSRunner.LargestComponentIndex);
+                }
                 // Cleanup memory.
                 SMRunner = LCMSMSRunner.ScansTable.Next;
                 while (SMRunner != null)
@@ -1328,7 +1343,7 @@ namespace TDAuditor
                         SLRunner = SMRunner.SimilarScans.Next;
                         while (SLRunner != null)
                         {
-			    DOTFile.WriteLine(SMRunner.ScanNumber + "--" + SLRunner.Other.ScanNumber);
+                            DOTFile.WriteLine(SMRunner.ScanNumber + "--" + SLRunner.Other.ScanNumber);
                             SLRunner = SLRunner.Next;
                         }
                     }
@@ -1358,53 +1373,53 @@ namespace TDAuditor
                 {
                     if (SMRunner.msAlignPeakCount > 1)
                     {
-			ThreadPool.QueueUserWorkItem(new WaitCallback(SMRunner.SequenceTagThisSpectrum));
-		    }
-		    SMRunner = SMRunner.Next;
-		}
-		// Here we need to wait until all those queued threads are complete
-		var StillRunning = true;
-		var junk = 0;
-		var maxWorkerThreads = 0;
-		var WorkerThreads = 0;
-		ThreadPool.GetMaxThreads(out maxWorkerThreads, out junk);
-		while (StillRunning)
-		{
-		    ThreadPool.GetAvailableThreads(out WorkerThreads, out junk);
-		    if (WorkerThreads == maxWorkerThreads)
-		    {
-			StillRunning=false;
-		    }
-		    else
-		    {
-			Thread.Sleep(100);
-		    }
-		}
-		// Now update the AALinkCounts and TagLengths for all spectra in this RAW.
-		SMRunner = LCMSMSRunner.ScansTable.Next;
-		while (SMRunner != null)
-		{
-		    if (SMRunner.msAlignPeakCount > 1)
-		    {
-			if (SMRunner.AALinkCount > LCMSMSExperiment.MaxPkCount)
+                        ThreadPool.QueueUserWorkItem(new WaitCallback(SMRunner.SequenceTagThisSpectrum));
+                    }
+                    SMRunner = SMRunner.Next;
+                }
+                // Here we need to wait until all those queued threads are complete
+                var StillRunning = true;
+                var junk = 0;
+                var maxWorkerThreads = 0;
+                var WorkerThreads = 0;
+                ThreadPool.GetMaxThreads(out maxWorkerThreads, out junk);
+                while (StillRunning)
+                {
+                    ThreadPool.GetAvailableThreads(out WorkerThreads, out junk);
+                    if (WorkerThreads == maxWorkerThreads)
+                    {
+                        StillRunning = false;
+                    }
+                    else
+                    {
+                        Thread.Sleep(100);
+                    }
+                }
+                // Now update the AALinkCounts and TagLengths for all spectra in this RAW.
+                SMRunner = LCMSMSRunner.ScansTable.Next;
+                while (SMRunner != null)
+                {
+                    if (SMRunner.msAlignPeakCount > 1)
+                    {
+                        if (SMRunner.AALinkCount > LCMSMSExperiment.MaxPkCount)
                             LCMSMSRunner.AALinkCountDistn[MaxPkCount]++;
                         else
                             LCMSMSRunner.AALinkCountDistn[SMRunner.AALinkCount]++;
-			if (SMRunner.AALinkCount > 2)
-			    LCMSMSRunner.AALinkCountAbove2++;
-			if (SMRunner.LongestTag > LCMSMSExperiment.MaxLength)
-			    LCMSMSRunner.LongestTagDistn[MaxLength]++;
-			else
-			    LCMSMSRunner.LongestTagDistn[SMRunner.LongestTag]++;
-		        if (SMRunner.LongestTag > LongestTagForThisRAW) LongestTagForThisRAW = SMRunner.LongestTag;
-			if (SMRunner.LongestTag > 2) LCMSMSRunner.LongestTagAbove2++;
-			if (WriteDeNovoTags)
-			{
-			    SMRunner.WriteDeNovoGraph(LCMSMSRunner.SourceFile + "-" + SMRunner.ScanNumber + "-DeNovo.txt");
-			}
-		    }
-		    SMRunner = SMRunner.Next;
-		}
+                        if (SMRunner.AALinkCount > 2)
+                            LCMSMSRunner.AALinkCountAbove2++;
+                        if (SMRunner.LongestTag > LCMSMSExperiment.MaxLength)
+                            LCMSMSRunner.LongestTagDistn[MaxLength]++;
+                        else
+                            LCMSMSRunner.LongestTagDistn[SMRunner.LongestTag]++;
+                        if (SMRunner.LongestTag > LongestTagForThisRAW) LongestTagForThisRAW = SMRunner.LongestTag;
+                        if (SMRunner.LongestTag > 2) LCMSMSRunner.LongestTagAbove2++;
+                        if (WriteDeNovoTags)
+                        {
+                            SMRunner.WriteDeNovoGraph(LCMSMSRunner.SourceFile + "-" + SMRunner.ScanNumber + "-DeNovo.txt");
+                        }
+                    }
+                    SMRunner = SMRunner.Next;
+                }
                 Console.WriteLine("\tInferred sequence tags as long as {0} AAs in {1}", LongestTagForThisRAW, LCMSMSRunner.SourceFile);
                 LCMSMSRunner = LCMSMSRunner.Next;
             }
@@ -1448,7 +1463,7 @@ namespace TDAuditor
         public void ComputeDistributions()
         {
             var LCMSMSRunner = this.Next;
-	    // TODO: include only MatchedToDeconvolution scans.
+            // TODO: include only MatchedToDeconvolution scans.
             while (LCMSMSRunner != null)
             {
                 LCMSMSRunner.mzMLPrecursorZQuartiles = QuartilesOf(LCMSMSRunner.mzMLPrecursorZDistn);
@@ -1457,46 +1472,427 @@ namespace TDAuditor
                 LCMSMSRunner.msAlignPeakCountQuartiles = QuartilesOf(LCMSMSRunner.msAlignPeakCountDistn);
                 LCMSMSRunner.AALinkCountQuartiles = QuartilesOf(LCMSMSRunner.AALinkCountDistn);
                 LCMSMSRunner.LongestTagQuartiles = QuartilesOf(LCMSMSRunner.LongestTagDistn);
-		// We need to build a sorted array from the precursor masses to get its quartiles.
-		var ScanCount = 0;
-		var ArrayIndex = 0;
-		var SMRunner = LCMSMSRunner.ScansTable.Next;
-		while (SMRunner != null) {
-		    if (SMRunner.msAlignPrecursorMass > 0) ScanCount++;
-		    SMRunner = SMRunner.Next;
-		}
-		if (ScanCount == 0)
-		{
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[0]=Double.NaN;
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[1]=Double.NaN;
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[2]=Double.NaN;
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[3]=Double.NaN;
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[4]=Double.NaN;
-		}
-		else
-		{
-		    var msAlignPrecursorMasses = new double[ScanCount];
-		    SMRunner = LCMSMSRunner.ScansTable.Next;
-		    while (SMRunner != null) {
-			if (SMRunner.msAlignPrecursorMass > 0)
-			{
-			    msAlignPrecursorMasses[ArrayIndex] = SMRunner.msAlignPrecursorMass;
-			    ArrayIndex++;
-			}
-			SMRunner = SMRunner.Next;
-		    }
-		    Array.Sort(msAlignPrecursorMasses);
-		    // Now we can extract the min, the max, and the inner quartiles
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[0] = msAlignPrecursorMasses[0];
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[1] = msAlignPrecursorMasses[ScanCount/4];
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[2] = msAlignPrecursorMasses[ScanCount/2];
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[3] = msAlignPrecursorMasses[ScanCount/4 + ScanCount/2];
-		    LCMSMSRunner.msAlignPrecursorMassQuartiles[4] = msAlignPrecursorMasses[ScanCount-1];
-		}
+                // We need to build a sorted array from the precursor masses to get its quartiles.
+                var ScanCount = 0;
+                var ArrayIndex = 0;
+                var SMRunner = LCMSMSRunner.ScansTable.Next;
+                while (SMRunner != null)
+                {
+                    if (SMRunner.msAlignPrecursorMass > 0) ScanCount++;
+                    SMRunner = SMRunner.Next;
+                }
+                if (ScanCount == 0)
+                {
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[0] = Double.NaN;
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[1] = Double.NaN;
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[2] = Double.NaN;
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[3] = Double.NaN;
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[4] = Double.NaN;
+                }
+                else
+                {
+                    var msAlignPrecursorMasses = new double[ScanCount];
+                    SMRunner = LCMSMSRunner.ScansTable.Next;
+                    while (SMRunner != null)
+                    {
+                        if (SMRunner.msAlignPrecursorMass > 0)
+                        {
+                            msAlignPrecursorMasses[ArrayIndex] = SMRunner.msAlignPrecursorMass;
+                            ArrayIndex++;
+                        }
+                        SMRunner = SMRunner.Next;
+                    }
+                    Array.Sort(msAlignPrecursorMasses);
+                    // Now we can extract the min, the max, and the inner quartiles
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[0] = msAlignPrecursorMasses[0];
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[1] = msAlignPrecursorMasses[ScanCount / 4];
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[2] = msAlignPrecursorMasses[ScanCount / 2];
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[3] = msAlignPrecursorMasses[ScanCount / 4 + ScanCount / 2];
+                    LCMSMSRunner.msAlignPrecursorMassQuartiles[4] = msAlignPrecursorMasses[ScanCount - 1];
+                }
                 LCMSMSRunner = LCMSMSRunner.Next;
             }
         }
 
+        public void WriteMZQCReport(string Version)
+        {
+            var LCMSMSRunner = this.Next;
+            var cv = new ControlledVocabulary
+            {
+                Name = "Proteomics Standards Initiative Mass Spectrometry Ontology",
+                Uri = new System.Uri("https://github.com/HUPO-PSI/psi-ms-CV/releases/download/v4.1.186/psi-ms.obo"),
+                Version = "4.1.186"
+            };
+            var runs = new List<BaseQuality>();
+            while (LCMSMSRunner != null)
+            {
+                //Why does FileFormat write a null "value" field?
+                var run = new BaseQuality
+                {
+                    Metadata = new Metadata
+                    {
+                        AnalysisSoftware = [new AnalysisSoftwareElement { Accession = "MS:NeedCVTerm", Name = "TDAuditor",
+                            Value = "Top-Down QC Metric Generator", Uri = new Uri("https://github.com/dtabb73/TDAuditor"), Version=Version}],
+                        InputFiles = [ new InputFile { Name = LCMSMSRunner.SourceFile,
+                            Location = LCMSMSRunner.FileURI,
+                            FileFormat = new CvParameter { Accession = "MS:1000584", Name = "mzML format"},
+                            FileProperties = [new CvParameter { Accession = "MS:1000031",
+                                Name = "instrument model",
+                                Value = LCMSMSRunner.Instrument},
+                                new CvParameter { Accession = "MS:1000747",
+                                Name = "completion time",
+                                Value = LCMSMSRunner.StartTimeStamp} ]
+                        }]
+                    }
+                };
+                run.QualityMetrics = new List<QualityMetric>();
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1001456",
+                    Name = "analysis software",
+                    Value = LCMSMSRunner.DeconvolutionEngine
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1000529",
+                    Name = "instrument serial number",
+                    Value = LCMSMSRunner.SerialNumber
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:4000053",
+                    Name = "chromatography duration",
+                    Value = LCMSMSRunner.MaxScanStartTime
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:4000059",
+                    Name = "number of MS1 spectra",
+                    Value = LCMSMSRunner.mzMLMS1Count
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:4000060",
+                    Name = "number of MS2 spectra",
+                    Value = LCMSMSRunner.mzMLMSnCount
+                }
+                );
+                var PopulatedInmsAlign = LCMSMSRunner.msAlignMSnCount - LCMSMSRunner.msAlignMSnCount0;
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "number of MSns containing peaks after deconvolution",
+                    Value = PopulatedInmsAlign
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "number of MSns lacking peaks after deconvolution",
+                    Value = LCMSMSRunner.msAlignMSnCount0
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "fraction of MSns containing peaks after deconvolution",
+                    Value = (PopulatedInmsAlign / (float)LCMSMSRunner.mzMLMSnCount)
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "fraction of pairwise MSn comparisons with many matching fragments",
+                    Value = LCMSMSRunner.Redundancy
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "highest degree among all MSn scans",
+                    Value = LCMSMSRunner.HighestDegree
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "largest connected component of related MSn scans",
+                    Value = LCMSMSRunner.LargestComponentSize
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "number of connected components among MSn scans",
+                    Value = LCMSMSRunner.ComponentCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "count of MSn scans resulting from HCD",
+                    Value = LCMSMSRunner.mzMLHCDCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "count of MSn scans resulting from CID",
+                    Value = LCMSMSRunner.mzMLCIDCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "count of MSn scans resulting from ETD",
+                    Value = LCMSMSRunner.mzMLETDCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "count of MSn scans resulting from ECD",
+                    Value = LCMSMSRunner.mzMLECDCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "number of MSn scans resulting from EThcD",
+                    Value = LCMSMSRunner.mzMLEThcDCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "number of MSn scans resulting from ETciD",
+                    Value = LCMSMSRunner.mzMLETciDCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Precursor charge quartiles from mzML",
+                    Value = LCMSMSRunner.mzMLPrecursorZQuartiles
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Precursor charge quartiles from deconvolution",
+                    Value = LCMSMSRunner.msAlignPrecursorZQuartiles
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Precursor mass quartiles from deconvolution",
+                    Value = LCMSMSRunner.msAlignPrecursorMassQuartiles
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Peak Count Quartiles from mzML",
+                    Value = LCMSMSRunner.mzMLPeakCountQuartiles
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Peak Count Quartiles from deconvolution",
+                    Value = LCMSMSRunner.msAlignPeakCountQuartiles
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Amino acid gap count quartiles from deconvolution",
+                    Value = LCMSMSRunner.AALinkCountQuartiles
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Longest sequence tag length quartiles from deconvolution",
+                    Value = LCMSMSRunner.LongestTagQuartiles
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Number of MSn with more than two amino acid gaps",
+                    Value = LCMSMSRunner.AALinkCountAbove2
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "Number of MSn with longest tag more than two amino acids",
+                    Value = LCMSMSRunner.LongestTagAbove2
+                }
+                );
+                var MSnCount = LCMSMSRunner.mzMLMSnCount;
+                var NativeIDs = new string[MSnCount];
+                var ScanStartTimes = new float[MSnCount];
+                var DissociationMethod = new string[MSnCount];
+                var MatchedToDeconvolution = new bool[MSnCount];
+                var mzMLPrecursorZ = new int[MSnCount];
+                var mzMLSelectedIon = new double[MSnCount];
+                var mzMLMassResolvingPower = new int[MSnCount];
+                var DeconvPrecursorZ = new int[MSnCount];
+                var DeconvPrecursorMass = new double[MSnCount];
+                var mzMLPkCount = new int[MSnCount];
+                var DeconvPkCount = new int[MSnCount];
+                var Degree = new int[MSnCount];
+                var ComponentNumber = new int[MSnCount];
+                var AAGapCount = new int[MSnCount];
+                var LongestTag = new int[MSnCount];
+                ScanMetrics SMRunner = LCMSMSRunner.ScansTable.Next;
+                int Index = 0;
+                while (SMRunner != null)
+                {
+                    NativeIDs[Index] = SMRunner.NativeID;
+                    ScanStartTimes[Index] = SMRunner.ScanStartTime;
+                    DissociationMethod[Index] = SMRunner.mzMLDissociation;
+                    MatchedToDeconvolution[Index] = SMRunner.MatchedToDeconvolution;
+                    mzMLPrecursorZ[Index] = SMRunner.mzMLPrecursorZ;
+                    mzMLSelectedIon[Index] = SMRunner.mzMLSelectedIon;
+                    mzMLMassResolvingPower[Index] = SMRunner.mzMLMassResolvingPower;
+                    DeconvPrecursorZ[Index] = SMRunner.msAlignPrecursorZ;
+                    DeconvPrecursorMass[Index] = SMRunner.msAlignPrecursorMass;
+                    mzMLPkCount[Index] = SMRunner.mzMLPeakCount;
+                    DeconvPkCount[Index] = SMRunner.msAlignPeakCount;
+                    Degree[Index] = SMRunner.Degree;
+                    ComponentNumber[Index] = SMRunner.ComponentNumber;
+                    AAGapCount[Index] = SMRunner.AALinkCount;
+                    LongestTag[Index] = SMRunner.LongestTag;
+                    Index++;
+                    SMRunner = SMRunner.Next;
+                }
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1000767",
+                    Name = "MSn NativeIDs",
+                    Value = NativeIDs
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1000016",
+                    Name = "MSn scanStartTimes",
+                    Value = ScanStartTimes
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1000044",
+                    Name = "dissociation methods",
+                    Value = DissociationMethod
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "MSn was reported in deconvolution output",
+                    Value = MatchedToDeconvolution
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1000041",
+                    Name = "MSn precursor charge state",
+                    Value = mzMLPrecursorZ
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1000744",
+                    Name = "selected ion m/z",
+                    Value = mzMLSelectedIon
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1000800",
+                    Name = "MSn mass resolving power",
+                    Value = mzMLMassResolvingPower
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1003255",
+                    Name = "MSn precursor charge state from deconvolution",
+                    Value = DeconvPrecursorZ
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "MSn precursor mass from deconvolution",
+                    Value = DeconvPrecursorMass
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:1003059",
+                    Name = "number of peaks in mzML",
+                    Value = mzMLPkCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "number of fragment masses from deconvolution",
+                    Value = DeconvPkCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "number of MSn scans judged similar to this MSn based on overlapping fragment masses",
+                    Value = Degree
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "an identifier to mark spectra that are in the same connected component as this MSn",
+                    Value = ComponentNumber
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "count of amino acid gaps formed by two fragment masses separated by mass of amino acid",
+                    Value = AAGapCount
+                }
+                );
+                run.QualityMetrics.Add(new QualityMetric
+                {
+                    Accession = "MS:NeedCVTerm",
+                    Name = "count of amino acids in the longest sequence tag that can be formed from amino acid gaps",
+                    Value = LongestTag
+                }
+                );
+                runs.Add(run);
+                LCMSMSRunner = LCMSMSRunner.Next;
+            }
+            var mzqc = new MzqcContent
+            {
+                Description = "TDAuditor QC report",
+                Version = "1.0.0",
+                CreationDate = DateTime.Now,
+                ControlledVocabularies = [cv],
+                RunQualities = runs
+            };
+            var file = new Mzqc { MzqcContent = mzqc };
+            File.WriteAllText(@"TDAuditor.mzqc.json", file.ToJson());
+        }
         public void WriteTextQCReport()
         {
             /*
@@ -1505,22 +1901,22 @@ namespace TDAuditor
               "byMSn" report contains a row for each MS/MS in each
               mzML in this directory.
              */
-	    //TODO: Should I be reporting distribution of deconvolved precursor mass by RAW?
+            //TODO: Should I be reporting distribution of deconvolved precursor mass by RAW?
             var LCMSMSRunner = this.Next;
             const string delim = "\t";
             using (var TSVbyRun = new StreamWriter("TDAuditor-byRun.tsv"))
             {
-                TSVbyRun.WriteLine("SourceFile\tInstrument\tSerialNumber\tStartTimeStamp\tRTDuration" +
-				   "\tmzMLMS1Count\tmzMLMSnCount\tDeconvMSnWithPeaksCount\tDeconvMSnWithoutPeaksCount\tDeconvMSnWithPeaksFraction" +
-				   "\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount" +
-				   "\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount" +
-				   "\tmzMLPreZMin\tmzMLPreZQ1\tmzMLPreZQ2\tmzMLPreZQ3\tmzMLPreZMax" +
-				   "\tDeconvPreZMin\tDeconvPreZQ1\tDeconvPreZQ2\tDeconvPreZQ3\tDeconvPreZMax" +
-				   "\tDeconvPreMassMin\tDeconvPreMassQ1\tDeconvPreMassQ2\tDeconvPreMassQ3\tDeconvPreMassMax" +
-				   "\tmzMLPeakCountMin\tmzMLPeakCountQ1\tmzMLPeakCountQ2\tmzMLPeakCountQ3\tmzMLPeakCountMax" +
-				   "\tDeconvPeakCountMin\tDeconvPeakCountQ1\tDeconvPeakCountQ2\tDeconvPeakCountQ3\tDeconvPeakCountMax" +
-				   "\tAALinkCountMin\tAALinkCountQ1\tAALinkCountQ2\tAALinkCountQ3\tAALinkCountMax" +
-				   "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tAALinkCountAbove2\tTagLengthAbove2");
+                TSVbyRun.WriteLine("SourceFile\tInstrument\tSerialNumber\tDeconvolutionEngine\tStartTimeStamp\tRTDuration" +
+                   "\tmzMLMS1Count\tmzMLMSnCount\tDeconvMSnWithPeaksCount\tDeconvMSnWithoutPeaksCount\tDeconvMSnWithPeaksFraction" +
+                   "\tRedundancy\tHighestDegree\tLargestComponentSize\tComponentCount" +
+                   "\tmzMLHCDCount\tmzMLCIDCount\tmzMLETDCount\tmzMLECDCount\tmzMLEThcDCount\tmzMLETciDCount" +
+                   "\tmzMLPreZMin\tmzMLPreZQ1\tmzMLPreZQ2\tmzMLPreZQ3\tmzMLPreZMax" +
+                   "\tDeconvPreZMin\tDeconvPreZQ1\tDeconvPreZQ2\tDeconvPreZQ3\tDeconvPreZMax" +
+                   "\tDeconvPreMassMin\tDeconvPreMassQ1\tDeconvPreMassQ2\tDeconvPreMassQ3\tDeconvPreMassMax" +
+                   "\tmzMLPeakCountMin\tmzMLPeakCountQ1\tmzMLPeakCountQ2\tmzMLPeakCountQ3\tmzMLPeakCountMax" +
+                   "\tDeconvPeakCountMin\tDeconvPeakCountQ1\tDeconvPeakCountQ2\tDeconvPeakCountQ3\tDeconvPeakCountMax" +
+                   "\tAALinkCountMin\tAALinkCountQ1\tAALinkCountQ2\tAALinkCountQ3\tAALinkCountMax" +
+                   "\tTagLengthMin\tTagLengthQ1\tTagLengthQ2\tTagLengthQ3\tTagLengthMax\tAALinkCountAbove2\tTagLengthAbove2");
                 while (LCMSMSRunner != null)
                 {
                     //We need to distinguish between MS/MS that yield deconvolved mass lists and those that don't.
@@ -1531,11 +1927,12 @@ namespace TDAuditor
                     TSVbyRun.Write(LCMSMSRunner.SourceFile + delim);
                     TSVbyRun.Write(LCMSMSRunner.Instrument + delim);
                     TSVbyRun.Write(LCMSMSRunner.SerialNumber + delim);
+                    TSVbyRun.Write(LCMSMSRunner.DeconvolutionEngine + delim);
                     TSVbyRun.Write(LCMSMSRunner.StartTimeStamp + delim);
                     TSVbyRun.Write(LCMSMSRunner.MaxScanStartTime + delim);
                     TSVbyRun.Write(LCMSMSRunner.mzMLMS1Count + delim);
                     TSVbyRun.Write(LCMSMSRunner.mzMLMSnCount + delim);
-		    //TSVbyRun.Write(LCMSMSRunner.MatchedToDeconvolution + delim);
+                    //TSVbyRun.Write(LCMSMSRunner.MatchedToDeconvolution + delim);
                     TSVbyRun.Write(MSnCountWithPeaks + delim);
                     TSVbyRun.Write(LCMSMSRunner.msAlignMSnCount0 + delim);
                     TSVbyRun.Write(MSnWithPeaksFraction + delim);
@@ -1553,8 +1950,8 @@ namespace TDAuditor
                         TSVbyRun.Write(ThisQuartile + delim);
                     foreach (var ThisQuartile in LCMSMSRunner.msAlignPrecursorZQuartiles)
                         TSVbyRun.Write(ThisQuartile + delim);
-		    foreach (var ThisQuartile in LCMSMSRunner.msAlignPrecursorMassQuartiles)
-			TSVbyRun.Write(ThisQuartile + delim);
+                    foreach (var ThisQuartile in LCMSMSRunner.msAlignPrecursorMassQuartiles)
+                        TSVbyRun.Write(ThisQuartile + delim);
                     foreach (var ThisQuartile in LCMSMSRunner.mzMLPeakCountQuartiles)
                         TSVbyRun.Write(ThisQuartile + delim);
                     foreach (var ThisQuartile in LCMSMSRunner.msAlignPeakCountQuartiles)
@@ -1582,10 +1979,10 @@ namespace TDAuditor
                         TSVbyScan.Write(SMRunner.ScanNumber + delim);
                         TSVbyScan.Write(SMRunner.ScanStartTime + delim);
                         TSVbyScan.Write(SMRunner.mzMLDissociation + delim);
-			TSVbyScan.Write(SMRunner.MatchedToDeconvolution + delim);
+                        TSVbyScan.Write(SMRunner.MatchedToDeconvolution + delim);
                         TSVbyScan.Write(SMRunner.mzMLPrecursorZ + delim);
-			TSVbyScan.Write(SMRunner.mzMLSelectedIon + delim);
-			TSVbyScan.Write(SMRunner.mzMLMassResolvingPower + delim);
+                        TSVbyScan.Write(SMRunner.mzMLSelectedIon + delim);
+                        TSVbyScan.Write(SMRunner.mzMLMassResolvingPower + delim);
                         TSVbyScan.Write(SMRunner.msAlignPrecursorZ + delim);
                         TSVbyScan.Write(SMRunner.msAlignPrecursorMass + delim);
                         TSVbyScan.Write(SMRunner.mzMLPeakCount + delim);
