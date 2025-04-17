@@ -12,7 +12,7 @@ namespace TDAuditor
     {
         static void Main(string[] args)
         {
-            const string Version = "20250410 beta";
+            const string Version = "20250417 beta";
             // Use periods to separate decimals
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
@@ -616,6 +616,7 @@ namespace TDAuditor
               to something even I can use).
              */
             ScansRunner = ScansTable;
+            int CurrentMSLevel = 0;
             while (Xread.Read())
             {
                 var ThisNodeType = Xread.NodeType;
@@ -739,11 +740,14 @@ namespace TDAuditor
                                 SerialNumber = Xread.GetAttribute("value");
                                 break;
                             case "MS:1000016":
-                                var ThisStartTime = Xread.GetAttribute("value");
-                                // We need the "InvariantCulture" nonsense because some parts of the world separate decimals with commas.
-                                var ThisStartTimeFloat = Single.Parse(ThisStartTime, CultureInfo.InvariantCulture);
-                                ScansRunner.ScanStartTime = ThisStartTimeFloat;
-                                if (ThisStartTimeFloat > MaxScanStartTime) MaxScanStartTime = ThisStartTimeFloat;
+                                if (CurrentMSLevel == 2)
+                                {
+                                    var ThisStartTime = Xread.GetAttribute("value");
+                                    // We need the "InvariantCulture" nonsense because some parts of the world separate decimals with commas.
+                                    var ThisStartTimeFloat = Single.Parse(ThisStartTime, CultureInfo.InvariantCulture);
+                                    ScansRunner.ScanStartTime = ThisStartTimeFloat;
+                                    if (ThisStartTimeFloat > MaxScanStartTime) MaxScanStartTime = ThisStartTimeFloat;
+                                }
                                 break;
                             case "MS:1000511":
                                 var ThisLevel = Xread.GetAttribute("value");
@@ -752,6 +756,7 @@ namespace TDAuditor
                                 {
                                     // We do very little with MS scans other than count them.
                                     mzMLMS1Count++;
+                                    CurrentMSLevel = 1;
                                 }
                                 else
                                 {
@@ -770,6 +775,7 @@ namespace TDAuditor
                                       Activation section.
                                      */
                                     mzMLMSnCount++;
+                                    CurrentMSLevel = 2;
                                     ScansRunner.Next = new ScanMetrics();
                                     ScansRunner = ScansRunner.Next;
                                     ScansRunner.NativeID = LastNativeID;
@@ -786,25 +792,34 @@ namespace TDAuditor
                                 }
                                 break;
                             case "MS:1000041":
-                                var ThisCharge = Xread.GetAttribute("value");
-                                var ThisChargeInt = int.Parse(ThisCharge);
-                                ScansRunner.mzMLPrecursorZ = ThisChargeInt;
-                                try
+                                if (CurrentMSLevel == 2)
                                 {
-                                    mzMLPrecursorZDistn[ThisChargeInt]++;
-                                }
-                                catch (IndexOutOfRangeException)
-                                {
-                                    Console.Error.WriteLine("Maximum charge of {0} is less than mzML charge {1}.", MaxZ, ThisChargeInt);
+                                    var ThisCharge = Xread.GetAttribute("value");
+                                    var ThisChargeInt = int.Parse(ThisCharge);
+                                    ScansRunner.mzMLPrecursorZ = ThisChargeInt;
+                                    try
+                                    {
+                                        mzMLPrecursorZDistn[ThisChargeInt]++;
+                                    }
+                                    catch (IndexOutOfRangeException)
+                                    {
+                                        Console.Error.WriteLine("Maximum charge of {0} is less than mzML charge {1}.", MaxZ, ThisChargeInt);
+                                    }
                                 }
                                 break;
                             case "MS:1000744":
-                                var ThisMZ = Xread.GetAttribute("value");
-                                ScansRunner.mzMLSelectedIon = double.Parse(ThisMZ);
+                                if (CurrentMSLevel == 2)
+                                {
+                                    var ThisMZ = Xread.GetAttribute("value");
+                                    ScansRunner.mzMLSelectedIon = double.Parse(ThisMZ);
+                                }
                                 break;
                             case "MS:1000800":
-                                var ThisPower = Xread.GetAttribute("value");
-                                ScansRunner.mzMLMassResolvingPower = int.Parse(ThisPower);
+                                if (CurrentMSLevel == 2)
+                                {
+                                    var ThisPower = Xread.GetAttribute("value");
+                                    ScansRunner.mzMLMassResolvingPower = int.Parse(ThisPower);
+                                }
                                 break;
                             case "MS:1000133":
                                 ThisScanIsCID = true;
