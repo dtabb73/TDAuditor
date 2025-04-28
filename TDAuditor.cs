@@ -12,12 +12,12 @@ namespace TDAuditor
     {
         static void Main(string[] args)
         {
-            const string Version = "20250417 beta";
+            const string Version = "20250428 beta";
             // Use periods to separate decimals
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Console.WriteLine("TDAuditor: Quality metrics for top-down proteomes");
             Console.WriteLine("David L. Tabb, University Medical Center of Groningen");
-            Console.WriteLine("Version ",Version);
+            Console.WriteLine("Version ", Version);
             Console.WriteLine("--MGF Read MGF file(s) produced by ProSight Proteome Discoverer.");
             Console.WriteLine("--CC  Write largest connected component graph for GraphViz.");
             Console.WriteLine("--DN  Write de novo sequence tag graphs for GraphViz.");
@@ -921,6 +921,7 @@ namespace TDAuditor
                 {
                     string[] Tokens;
                     string[] SemiTokens;
+                    string[] ScanSplit;
                     if (LineBuffer.Contains("="))
                     {
                         Tokens = LineBuffer.Split('=');
@@ -946,7 +947,17 @@ namespace TDAuditor
                                 {
                                     try
                                     {
-                                        NumberFromString = int.Parse(Scan);
+                                        /* Frequently, ProSightPD will combine data from multiple MS/MS scans
+                                         * to a single scan in the MGF.  We record only the first scan number. */
+                                        if (Scan.Contains(","))
+                                        {
+                                            ScanSplit = Scan.Split(',');
+                                            NumberFromString = int.Parse(ScanSplit[0]);
+                                        }
+                                        else
+                                        {
+                                            NumberFromString = int.Parse(Scan);
+                                        }
                                         PeakList = new MSMSPeak();
                                         PeakRunner = PeakList;
                                         ScanRunner = RawRunner.GoToScan(NumberFromString);
@@ -1264,9 +1275,29 @@ namespace TDAuditor
                       division by zero.
                     */
                     LCMSMSRunner.Redundancy = LinkCount / ((float)NonVacantScanCount * (NonVacantScanCount - 1) / 2.0f);
+                    if (WriteConnectedComponents)
+                    {
+                        using (var DOTFile = new StreamWriter(LCMSMSRunner.SourceFile + "-AllConnectedComponents.txt"))
+                        {
+                            DOTFile.WriteLine("graph AllConnectedComponents {");
+                            SMRunner = LCMSMSRunner.ScansTable.Next;
+                            while (SMRunner != null)
+                            {
+                                var SLRunner = SMRunner.SimilarScans.Next;
+                                while (SLRunner != null)
+                                {
+                                    DOTFile.WriteLine(SMRunner.ScanNumber + "--" + SLRunner.Other.ScanNumber);
+                                    SLRunner = SLRunner.Next;
+                                }
+                                SMRunner = SMRunner.Next;
+                            }
+                            DOTFile.WriteLine("}");
+                        }
+                    }
+
                 }
                 Console.WriteLine("\tDetected {0}% of possible MSn-MSn similarity in {1}",
-                          Math.Round(LCMSMSRunner.Redundancy * 100, 2), LCMSMSRunner.SourceFile);
+                      Math.Round(LCMSMSRunner.Redundancy * 100, 2), LCMSMSRunner.SourceFile);
 
                 SMRunner = LCMSMSRunner.ScansTable.Next;
                 var MaxDegreeSoFar = 0;
